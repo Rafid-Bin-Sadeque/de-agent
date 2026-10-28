@@ -1,0 +1,316 @@
+{
+  "$defs": {
+    "ConnConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "default": "localhost",
+          "description": "Database host (as seen from where the collector runs).",
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "default": 5432,
+          "description": "Database port.",
+          "title": "Port",
+          "type": "integer"
+        },
+        "dbname": {
+          "description": "Database name.",
+          "title": "Dbname",
+          "type": "string"
+        },
+        "user": {
+          "description": "Role to connect as. Use a read-only role.",
+          "title": "User",
+          "type": "string"
+        },
+        "password": {
+          "default": "pgpass",
+          "description": "Secret reference: `pgpass`, `none`, `env:NAME` or `file:/abs/path` (mode 0600). A literal is a load error.",
+          "title": "Password",
+          "type": "string"
+        },
+        "sslmode": {
+          "default": "prefer",
+          "description": "libpq sslmode: disable, allow, prefer, require, verify-ca or verify-full.",
+          "title": "Sslmode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dbname",
+        "user"
+      ],
+      "title": "ConnConfig",
+      "type": "object"
+    },
+    "GuardConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "strict",
+          "description": "`strict` denies a database write outside an approved plan; `ask` prompts instead of denying.",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "GuardConfig",
+      "type": "object"
+    },
+    "HubConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": "data platform",
+          "description": "Platform name, shown in the generated map.",
+          "title": "Name",
+          "type": "string"
+        },
+        "map_budget_tokens": {
+          "default": 1500,
+          "description": "Token budget for the generated map.md (the file loaded every session).",
+          "exclusiveMinimum": 0,
+          "title": "Map Budget Tokens",
+          "type": "integer"
+        },
+        "snapshot_max_age_hours": {
+          "default": 24,
+          "description": "A snapshot older than this is flagged as stale at session start.",
+          "exclusiveMinimum": 0,
+          "title": "Snapshot Max Age Hours",
+          "type": "number"
+        },
+        "retention": {
+          "default": 30,
+          "description": "Number of dated snapshots kept per source.",
+          "minimum": 1,
+          "title": "Retention",
+          "type": "integer"
+        }
+      },
+      "title": "HubConfig",
+      "type": "object"
+    },
+    "ScanConfig": {
+      "additionalProperties": false,
+      "description": "One static scan (M1c). Paths are relative to the hub. Scanned code is parsed, never imported or run.",
+      "properties": {
+        "name": {
+          "description": "Scan name, `[a-z0-9_-]+`.",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "description": "Scanner type: airflow, dbt or sql.",
+          "title": "Type",
+          "type": "string"
+        },
+        "path": {
+          "description": "Directory to scan, relative to the hub. Parsed, never imported or run.",
+          "title": "Path",
+          "type": "string"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project name the catalog entries belong to. Default: the scan name.",
+          "title": "Project"
+        },
+        "dag_folders": {
+          "description": "airflow: DAG folders under `path`.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Dag Folders",
+          "type": "array"
+        },
+        "util_packages": {
+          "description": "airflow: shared packages whose functions are resolved to their callers.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Util Packages",
+          "type": "array"
+        },
+        "dataset_tables": {
+          "description": "airflow: Dataset URI patterns, e.g. `warehouse://{schema}/{table}` (must contain `{table}`).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Dataset Tables",
+          "type": "array"
+        },
+        "target_dir": {
+          "default": "target",
+          "description": "dbt: directory holding `manifest.json`, relative to `path`.",
+          "title": "Target Dir",
+          "type": "string"
+        },
+        "globs": {
+          "description": "sql: file globs under `path`.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Globs",
+          "type": "array"
+        },
+        "dialect": {
+          "default": "postgres",
+          "description": "airflow (SQL strings) and sql: sqlglot dialect used to parse SQL.",
+          "title": "Dialect",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "path"
+      ],
+      "title": "ScanConfig",
+      "type": "object"
+    },
+    "SourceConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Source name, `[a-z0-9_-]+`; used in file names and `dea query <source>`.",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "description": "Collector type: postgres, redshift, airflow, dbt or aws (see docs/collectors.md).",
+          "title": "Type",
+          "type": "string"
+        },
+        "exec": {
+          "default": "local",
+          "description": "`local`, or `ssh:<host-alias>` to run the collector on another host over ssh.",
+          "title": "Exec",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Per-collector timeout. Unset: 600 for redshift, 120 otherwise.",
+          "title": "Timeout Seconds"
+        },
+        "conn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Database connection (postgres and redshift sources)."
+        },
+        "data_api": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "redshift only: Data API target `{cluster_id|workgroup, database, db_user|secret_arn}`.",
+          "title": "Data Api"
+        },
+        "aws": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "aws and redshift: `{profile, region}` or `{instance_role: true}`.",
+          "title": "Aws"
+        },
+        "services": {
+          "additionalProperties": true,
+          "description": "aws only: which services to read (dms, glue, s3, athena, firehose, cloudwatch) and their options.",
+          "title": "Services",
+          "type": "object"
+        },
+        "writable": {
+          "default": false,
+          "description": "postgres only: the role may write. Used by `dea apply` for approved plans, never snapshotted.",
+          "title": "Writable",
+          "type": "boolean"
+        },
+        "options": {
+          "additionalProperties": true,
+          "description": "Collector-specific options (airflow, dbt, aws); see docs/collectors.md.",
+          "title": "Options",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "SourceConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "default": 1,
+      "description": "Config format version. Only 1 exists.",
+      "title": "Version",
+      "type": "integer"
+    },
+    "hub": {
+      "$ref": "#/$defs/HubConfig",
+      "description": "Hub-wide settings."
+    },
+    "sources": {
+      "description": "Live systems read by `dea snapshot` (read-only collectors).",
+      "items": {
+        "$ref": "#/$defs/SourceConfig"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "scans": {
+      "description": "Code scanned by `dea scan` into the catalog.",
+      "items": {
+        "$ref": "#/$defs/ScanConfig"
+      },
+      "title": "Scans",
+      "type": "array"
+    },
+    "guard": {
+      "$ref": "#/$defs/GuardConfig",
+      "description": "Write-guard behaviour."
+    }
+  },
+  "title": "de-agent.yaml",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

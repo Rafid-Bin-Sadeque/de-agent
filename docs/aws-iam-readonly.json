@@ -1,0 +1,105 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "GtAthena",
+      "Effect": "Allow",
+      "Action": [
+        "athena:BatchGetQueryExecution",
+        "athena:ListQueryExecutions"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GtCloudwatch",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:GetMetricData"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GtDms",
+      "Effect": "Allow",
+      "Action": [
+        "dms:DescribeEndpoints",
+        "dms:DescribeReplicationInstances",
+        "dms:DescribeReplicationTasks",
+        "dms:DescribeTableStatistics"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GtFirehose",
+      "Effect": "Allow",
+      "Action": [
+        "firehose:DescribeDeliveryStream",
+        "firehose:ListDeliveryStreams"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GtGlue",
+      "Effect": "Allow",
+      "Action": [
+        "glue:GetCrawlers",
+        "glue:GetJobRuns",
+        "glue:GetJobs",
+        "glue:GetPartitions",
+        "glue:GetTables"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GtRedshift",
+      "Effect": "Allow",
+      "Action": [
+        "redshift:DescribeClusters"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GtRedshiftData",
+      "Effect": "Allow",
+      "Action": [
+        "redshift-data:BatchExecuteStatement",
+        "redshift-data:CancelStatement",
+        "redshift-data:DescribeStatement",
+        "redshift-data:GetStatementResult"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GtRedshiftServerless",
+      "Effect": "Allow",
+      "Action": [
+        "redshift-serverless:GetWorkgroup"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GtS3",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GtRedshiftDataApiCredentials",
+      "Effect": "Allow",
+      "Action": [
+        "redshift-serverless:GetCredentials",
+        "redshift:GetClusterCredentials",
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:<region>:<account>:secret:<your-redshift-secret>*",
+        "arn:aws:redshift:<region>:<account>:dbuser:<cluster>/<readonly_user>",
+        "arn:aws:redshift:<region>:<account>:dbname:<cluster>/<database>",
+        "arn:aws:redshift-serverless:<region>:<account>:workgroup/<workgroup-id>"
+      ]
+    }
+  ]
+}

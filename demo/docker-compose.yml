@@ -1,0 +1,133 @@
+# Acme Shop demo platform (fictional). All ports bind to 127.0.0.1. Image tags are pinned.
+name: dea-demo
+
+x-app-build: &app-build
+  context: .
+  dockerfile: app.Dockerfile
+
+services:
+  source-db:
+    image: postgres:16.4
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop_owner
+      POSTGRES_PASSWORD: ${DEMO_SRC_PASSWORD}
+      DEMO_ETL_PASSWORD: ${DEMO_ETL_PASSWORD}
+      DEMO_WH_PASSWORD: ${DEMO_WH_PASSWORD}
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=60"]
+    ports: ["127.0.0.1:${DEMO_SRC_PORT:-5440}:5432"]
+    volumes:
+      - source-data:/var/lib/postgresql/data
+      - ./seed/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+      - ./seed/roles.sh:/docker-entrypoint-initdb.d/20-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop_owner -d shop"]
+      interval: 3s
+      retries: 30
+    mem_limit: 512m
+
+  warehouse:
+    image: postgres:16.4
+    environment:
+      POSTGRES_DB: warehouse
+      POSTGRES_USER: wh_owner
+      POSTGRES_PASSWORD: ${DEMO_ETL_PASSWORD}
+      DEMO_ETL_PASSWORD: ${DEMO_ETL_PASSWORD}
+      DEMO_WH_PASSWORD: ${DEMO_WH_PASSWORD}
+    command: ["postgres", "-c", "shared_buffers=256MB", "-c", "max_connections=100"]
+    ports: ["127.0.0.1:${DEMO_WH_PORT:-5441}:5432"]
+    volumes:
+      - warehouse-data:/var/lib/postgresql/data
+      - ./warehouse/init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
+      - ./warehouse/init.sql:/docker-entrypoint-initdb.d/20-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wh_owner -d warehouse"]
+      interval: 3s
+      retries: 30
+    mem_limit: 768m
+
+  seed:
+    build: *app-build
+    command: ["python", "/app/seed/generate.py"]
+    environment: &app-env
+      SRC_HOST: source-db
+      DEMO_SRC_PASSWORD: ${DEMO_SRC_PASSWORD}
+    volumes: ["./seed:/app/seed:ro"]
+    depends_on:
+      source-db: {condition: service_healthy}
+    restart: "no"
+    mem_limit: 512m
+
+  app-sim:
+    build: *app-build
+    command: ["python", "/app/app_sim.py"]
+    environment: *app-env
+    volumes: ["./app_sim.py:/app/app_sim.py:ro"]
+    depends_on:
+      seed: {condition: service_completed_successfully}
+    restart: unless-stopped
+    mem_limit: 128m
+
+  s3:
+    # S3 stand-in. SeaweedFS (Apache-2.0) because Docker Hub no longer serves minio tags; pulled by tag.
+    image: chrislusf/seaweedfs:4.51
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/s3.json <<EOF
+        {"identities":[{"name":"demo","credentials":[{"accessKey":"$$DEMO_S3_USER","secretKey":"$$DEMO_S3_PASSWORD"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
+        EOF
+        exec weed server -dir=/data -master.volumeSizeLimitMB=64 -volume.max=20 -s3 -s3.port=8333 -s3.config=/tmp/s3.json -ip=s3
+    environment:
+      DEMO_S3_USER: ${DEMO_S3_USER}
+      DEMO_S3_PASSWORD: ${DEMO_S3_PASSWORD}
+    ports: ["127.0.0.1:${DEMO_S3_PORT:-8333}:8333"]
+    volumes: [s3-data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status && wget -S -O /dev/null http://127.0.0.1:8333/ 2>&1 | grep -q 'HTTP/'"]
+      interval: 5s
+      retries: 20
+    mem_limit: 384m
+
+  airflow:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__PARALLELISM: "4"
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "15"
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "15"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow_meta:${DEMO_ETL_PASSWORD}@warehouse:5432/airflow_meta
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+      AIRFLOW__WEBSERVER__SECRET_KEY: demo-only-not-a-secret
+      AIRFLOW__CORE__FERNET_KEY: ""
+      AIRFLOW_CONN_SOURCE_DB: postgresql://etl_reader:${DEMO_SRC_PASSWORD}@source-db:5432/shop
+      AIRFLOW_CONN_WAREHOUSE: postgresql://etl:${DEMO_ETL_PASSWORD}@warehouse:5432/warehouse
+      DEMO_ETL_PASSWORD: ${DEMO_ETL_PASSWORD}
+      DEMO_AF_PASSWORD: ${DEMO_AF_PASSWORD}
+      DEMO_AF_ADMIN_PASSWORD: ${DEMO_AF_ADMIN_PASSWORD}
+      DEMO_S3_USER: ${DEMO_S3_USER}
+      DEMO_S3_PASSWORD: ${DEMO_S3_PASSWORD}
+      DBT_PROFILES_DIR: /opt/dbt/acme
+      DBT_WH_PASSWORD: ${DEMO_ETL_PASSWORD}
+    ports: ["127.0.0.1:${DEMO_AF_PORT:-8085}:8080"]
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags:ro
+      - ./dbt/acme:/opt/dbt/acme
+    depends_on:
+      warehouse: {condition: service_healthy}
+      source-db: {condition: service_healthy}
+      s3: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/health | grep -q '\"healthy\"'"]
+      interval: 10s
+      retries: 40
+      start_period: 40s
+    mem_limit: 2g
+
+volumes:
+  source-data:
+  warehouse-data:
+  s3-data:

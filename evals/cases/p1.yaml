@@ -1,0 +1,12 @@
+{
+  "id": "P1",
+  "group": "planning",
+  "prompt": "rebuild analytics.mart_daily_revenue for 2026-10-01..2026-10-03 (finance found a late correction)",
+  "structure": "chunked",
+  "setup": {"script": "p1_setup.sh"},
+  "teardown": {},
+  "runs": {
+    "plugin": 2,
+    "baseline": 2
+  }
+}

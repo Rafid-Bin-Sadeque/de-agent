@@ -1,0 +1,455 @@
+{
+ "exposures": {},
+ "metadata": {
+  "adapter_type": "postgres",
+  "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+  "dbt_version": "1.8.10",
+  "generated_at": "2026-10-27T10:14:27.250820Z",
+  "project_name": "acme"
+ },
+ "nodes": {
+  "model.acme.dim_customers": {
+   "config": {
+    "materialized": "table"
+   },
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "model.acme.stg_customers",
+     "model.acme.stg_orders"
+    ]
+   },
+   "name": "dim_customers",
+   "original_file_path": "models/marts/dim_customers.sql",
+   "path": "marts/dim_customers.sql",
+   "resource_type": "model",
+   "unique_id": "model.acme.dim_customers"
+  },
+  "model.acme.fct_orders": {
+   "config": {
+    "materialized": "incremental"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.is_incremental"
+    ],
+    "nodes": [
+     "model.acme.stg_order_items",
+     "model.acme.stg_orders"
+    ]
+   },
+   "name": "fct_orders",
+   "original_file_path": "models/marts/fct_orders.sql",
+   "path": "marts/fct_orders.sql",
+   "resource_type": "model",
+   "unique_id": "model.acme.fct_orders"
+  },
+  "model.acme.mart_daily_revenue": {
+   "config": {
+    "materialized": "table"
+   },
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "model.acme.fct_orders"
+    ]
+   },
+   "name": "mart_daily_revenue",
+   "original_file_path": "models/marts/mart_daily_revenue.sql",
+   "path": "marts/mart_daily_revenue.sql",
+   "resource_type": "model",
+   "unique_id": "model.acme.mart_daily_revenue"
+  },
+  "model.acme.stg_customers": {
+   "config": {
+    "materialized": "view"
+   },
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "source.acme.raw.customers"
+    ]
+   },
+   "name": "stg_customers",
+   "original_file_path": "models/staging/stg_customers.sql",
+   "path": "staging/stg_customers.sql",
+   "resource_type": "model",
+   "unique_id": "model.acme.stg_customers"
+  },
+  "model.acme.stg_events": {
+   "config": {
+    "materialized": "view"
+   },
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "source.acme.raw.events"
+    ]
+   },
+   "name": "stg_events",
+   "original_file_path": "models/staging/stg_events.sql",
+   "path": "staging/stg_events.sql",
+   "resource_type": "model",
+   "unique_id": "model.acme.stg_events"
+  },
+  "model.acme.stg_order_items": {
+   "config": {
+    "materialized": "view"
+   },
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "source.acme.raw.order_items"
+    ]
+   },
+   "name": "stg_order_items",
+   "original_file_path": "models/staging/stg_order_items.sql",
+   "path": "staging/stg_order_items.sql",
+   "resource_type": "model",
+   "unique_id": "model.acme.stg_order_items"
+  },
+  "model.acme.stg_orders": {
+   "config": {
+    "materialized": "view"
+   },
+   "depends_on": {
+    "macros": [],
+    "nodes": [
+     "source.acme.raw.orders"
+    ]
+   },
+   "name": "stg_orders",
+   "original_file_path": "models/staging/stg_orders.sql",
+   "path": "staging/stg_orders.sql",
+   "resource_type": "model",
+   "unique_id": "model.acme.stg_orders"
+  },
+  "test.acme.accepted_values_fct_orders_status__pending__paid__shipped__delivered__cancelled__refunded.0ee299da59": {
+   "attached_node": "model.acme.fct_orders",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_accepted_values",
+     "macro.dbt.get_where_subquery"
+    ],
+    "nodes": [
+     "model.acme.fct_orders"
+    ]
+   },
+   "name": "accepted_values_fct_orders_status__pending__paid__shipped__delivered__cancelled__refunded",
+   "original_file_path": "models/marts/schema.yml",
+   "path": "accepted_values_fct_orders_61a21d6d267ad166806e113db028e616.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.accepted_values_fct_orders_status__pending__paid__shipped__delivered__cancelled__refunded.0ee299da59"
+  },
+  "test.acme.accepted_values_stg_orders_status__pending__paid__shipped__delivered__cancelled__refunded.0ddc57fdf5": {
+   "attached_node": "model.acme.stg_orders",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_accepted_values",
+     "macro.dbt.get_where_subquery"
+    ],
+    "nodes": [
+     "model.acme.stg_orders"
+    ]
+   },
+   "name": "accepted_values_stg_orders_status__pending__paid__shipped__delivered__cancelled__refunded",
+   "original_file_path": "models/staging/schema.yml",
+   "path": "accepted_values_stg_orders_af74045748ae45d7f062bb07efe87efb.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.accepted_values_stg_orders_status__pending__paid__shipped__delivered__cancelled__refunded.0ddc57fdf5"
+  },
+  "test.acme.not_null_dim_customers_customer_id.dd91cd1c8d": {
+   "attached_node": "model.acme.dim_customers",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_not_null"
+    ],
+    "nodes": [
+     "model.acme.dim_customers"
+    ]
+   },
+   "name": "not_null_dim_customers_customer_id",
+   "original_file_path": "models/marts/schema.yml",
+   "path": "not_null_dim_customers_customer_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.not_null_dim_customers_customer_id.dd91cd1c8d"
+  },
+  "test.acme.not_null_fct_orders_order_id.4e687af8d0": {
+   "attached_node": "model.acme.fct_orders",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_not_null"
+    ],
+    "nodes": [
+     "model.acme.fct_orders"
+    ]
+   },
+   "name": "not_null_fct_orders_order_id",
+   "original_file_path": "models/marts/schema.yml",
+   "path": "not_null_fct_orders_order_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.not_null_fct_orders_order_id.4e687af8d0"
+  },
+  "test.acme.not_null_mart_daily_revenue_order_date.afa9807e23": {
+   "attached_node": "model.acme.mart_daily_revenue",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_not_null"
+    ],
+    "nodes": [
+     "model.acme.mart_daily_revenue"
+    ]
+   },
+   "name": "not_null_mart_daily_revenue_order_date",
+   "original_file_path": "models/marts/schema.yml",
+   "path": "not_null_mart_daily_revenue_order_date.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.not_null_mart_daily_revenue_order_date.afa9807e23"
+  },
+  "test.acme.not_null_stg_customers_customer_id.e2cfb1f9aa": {
+   "attached_node": "model.acme.stg_customers",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_not_null"
+    ],
+    "nodes": [
+     "model.acme.stg_customers"
+    ]
+   },
+   "name": "not_null_stg_customers_customer_id",
+   "original_file_path": "models/staging/schema.yml",
+   "path": "not_null_stg_customers_customer_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.not_null_stg_customers_customer_id.e2cfb1f9aa"
+  },
+  "test.acme.not_null_stg_events_event_id.715b3f7012": {
+   "attached_node": "model.acme.stg_events",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_not_null"
+    ],
+    "nodes": [
+     "model.acme.stg_events"
+    ]
+   },
+   "name": "not_null_stg_events_event_id",
+   "original_file_path": "models/staging/schema.yml",
+   "path": "not_null_stg_events_event_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.not_null_stg_events_event_id.715b3f7012"
+  },
+  "test.acme.not_null_stg_order_items_order_item_id.26a7e2bc35": {
+   "attached_node": "model.acme.stg_order_items",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_not_null"
+    ],
+    "nodes": [
+     "model.acme.stg_order_items"
+    ]
+   },
+   "name": "not_null_stg_order_items_order_item_id",
+   "original_file_path": "models/staging/schema.yml",
+   "path": "not_null_stg_order_items_order_item_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.not_null_stg_order_items_order_item_id.26a7e2bc35"
+  },
+  "test.acme.not_null_stg_orders_order_id.81cfe2fe64": {
+   "attached_node": "model.acme.stg_orders",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_not_null"
+    ],
+    "nodes": [
+     "model.acme.stg_orders"
+    ]
+   },
+   "name": "not_null_stg_orders_order_id",
+   "original_file_path": "models/staging/schema.yml",
+   "path": "not_null_stg_orders_order_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.not_null_stg_orders_order_id.81cfe2fe64"
+  },
+  "test.acme.relationships_fct_orders_customer_id__customer_id__ref_dim_customers_.d5636051d4": {
+   "attached_node": "model.acme.fct_orders",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_relationships",
+     "macro.dbt.get_where_subquery"
+    ],
+    "nodes": [
+     "model.acme.dim_customers",
+     "model.acme.fct_orders"
+    ]
+   },
+   "name": "relationships_fct_orders_customer_id__customer_id__ref_dim_customers_",
+   "original_file_path": "models/marts/schema.yml",
+   "path": "relationships_fct_orders_0c6c6d9e6f30dfb9b653557ebf38e47c.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.relationships_fct_orders_customer_id__customer_id__ref_dim_customers_.d5636051d4"
+  },
+  "test.acme.unique_dim_customers_customer_id.15c9f1e2fd": {
+   "attached_node": "model.acme.dim_customers",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_unique"
+    ],
+    "nodes": [
+     "model.acme.dim_customers"
+    ]
+   },
+   "name": "unique_dim_customers_customer_id",
+   "original_file_path": "models/marts/schema.yml",
+   "path": "unique_dim_customers_customer_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.unique_dim_customers_customer_id.15c9f1e2fd"
+  },
+  "test.acme.unique_fct_orders_order_id.523ddb6ce5": {
+   "attached_node": "model.acme.fct_orders",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_unique"
+    ],
+    "nodes": [
+     "model.acme.fct_orders"
+    ]
+   },
+   "name": "unique_fct_orders_order_id",
+   "original_file_path": "models/marts/schema.yml",
+   "path": "unique_fct_orders_order_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.unique_fct_orders_order_id.523ddb6ce5"
+  },
+  "test.acme.unique_mart_daily_revenue_order_date.d69c8c5e9b": {
+   "attached_node": "model.acme.mart_daily_revenue",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_unique"
+    ],
+    "nodes": [
+     "model.acme.mart_daily_revenue"
+    ]
+   },
+   "name": "unique_mart_daily_revenue_order_date",
+   "original_file_path": "models/marts/schema.yml",
+   "path": "unique_mart_daily_revenue_order_date.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.unique_mart_daily_revenue_order_date.d69c8c5e9b"
+  },
+  "test.acme.unique_stg_customers_customer_id.c7614daada": {
+   "attached_node": "model.acme.stg_customers",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_unique"
+    ],
+    "nodes": [
+     "model.acme.stg_customers"
+    ]
+   },
+   "name": "unique_stg_customers_customer_id",
+   "original_file_path": "models/staging/schema.yml",
+   "path": "unique_stg_customers_customer_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.unique_stg_customers_customer_id.c7614daada"
+  },
+  "test.acme.unique_stg_events_event_id.66ebb17438": {
+   "attached_node": "model.acme.stg_events",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_unique"
+    ],
+    "nodes": [
+     "model.acme.stg_events"
+    ]
+   },
+   "name": "unique_stg_events_event_id",
+   "original_file_path": "models/staging/schema.yml",
+   "path": "unique_stg_events_event_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.unique_stg_events_event_id.66ebb17438"
+  },
+  "test.acme.unique_stg_order_items_order_item_id.90e333a108": {
+   "attached_node": "model.acme.stg_order_items",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_unique"
+    ],
+    "nodes": [
+     "model.acme.stg_order_items"
+    ]
+   },
+   "name": "unique_stg_order_items_order_item_id",
+   "original_file_path": "models/staging/schema.yml",
+   "path": "unique_stg_order_items_order_item_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.unique_stg_order_items_order_item_id.90e333a108"
+  },
+  "test.acme.unique_stg_orders_order_id.e3b841c71a": {
+   "attached_node": "model.acme.stg_orders",
+   "config": {
+    "materialized": "test"
+   },
+   "depends_on": {
+    "macros": [
+     "macro.dbt.test_unique"
+    ],
+    "nodes": [
+     "model.acme.stg_orders"
+    ]
+   },
+   "name": "unique_stg_orders_order_id",
+   "original_file_path": "models/staging/schema.yml",
+   "path": "unique_stg_orders_order_id.sql",
+   "resource_type": "test",
+   "unique_id": "test.acme.unique_stg_orders_order_id.e3b841c71a"
+  }
+ }
+}

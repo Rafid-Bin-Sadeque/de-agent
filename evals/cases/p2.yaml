@@ -1,0 +1,12 @@
+{
+  "id": "P2",
+  "group": "planning",
+  "prompt": "rename raw.orders.customer_id to cust_id safely",
+  "structure": "expand_contract",
+  "setup": {},
+  "teardown": {},
+  "runs": {
+    "plugin": 2,
+    "baseline": 2
+  }
+}

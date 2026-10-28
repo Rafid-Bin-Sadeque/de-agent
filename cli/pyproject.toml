@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "de-agent"
+version = "0.1.0"
+description = "Ground-truth context, guardrails and workflows for data engineering with Claude Code"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.10"
+authors = [{ name = "de-agent maintainers" }]
+keywords = ["data-engineering", "claude-code", "airflow", "dbt", "redshift", "postgres", "guardrails"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Database",
+  "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = ["sqlglot>=30,<31", "pydantic>=2", "pyyaml", "typer"]
+
+[project.optional-dependencies]
+aws = ["boto3"]
+pg = ["psycopg[binary]>=3.1"]
+dev = ["pytest", "pytest-cov", "ruff", "boto3", "moto[all]", "psycopg[binary]>=3.1"]
+
+[project.urls]
+Homepage = "https://github.com/Rafid-Bin-Sadeque/de-agent"
+Documentation = "https://github.com/Rafid-Bin-Sadeque/de-agent#readme"
+Repository = "https://github.com/Rafid-Bin-Sadeque/de-agent"
+Issues = "https://github.com/Rafid-Bin-Sadeque/de-agent/issues"
+Changelog = "https://github.com/Rafid-Bin-Sadeque/de-agent/blob/main/CHANGELOG.md"
+
+[project.scripts]
+dea = "de_agent.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/de_agent"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/de_agent", "tests", "README.md", "LICENSE", "NOTICE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not perf'"
+markers = [
+  "integration: needs docker (postgres:16); skipped when unavailable",
+  "demo: end-to-end against the demo stack (set DEA_DEMO=1)",
+  "walkthrough: scripted claude -p flow on demo fault 01 (needs DEA_DEMO=1 and the claude CLI; run locally, not in CI)",
+  "perf: 1,000-DAG synthetic scan timings; excluded by default, run with -m perf",
+]

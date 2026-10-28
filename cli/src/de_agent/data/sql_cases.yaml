@@ -1,0 +1,1735 @@
+- sql: select 1
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: SELECT * FROM orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select id, total from orders where total > 100 order by total desc limit 10
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select count(*) from customers
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select o.id, c.name from orders o join customers c on c.id = o.customer_id
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select customer_id, sum(total) from orders group by 1 having sum(total) > 10
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from orders where created_at >= now() - interval '1 day'
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select distinct status from orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from analytics.daily_orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from events where payload->>'type' = 'click'
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select a from t1 union select a from t2
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select a from t1 union all select a from t2
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select a from t1 intersect select a from t2
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select a from t1 except select a from t2
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: (select 1)
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: with recent as (select * from orders where total > 5) select * from recent
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: with a as (select 1 as x), b as (select x from a) select * from b
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: with recursive n(i) as (select 1 union all select i + 1 from n where i < 5) select * from n
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from (select id from orders) s
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from orders o where exists (select 1 from customers c where c.id = o.customer_id)
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select id, row_number() over (partition by customer_id order by created_at) from orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select coalesce(a, 0), case when b > 1 then 'x' else 'y' end from t
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from pg_stat_activity
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select pg_size_pretty(pg_database_size(current_database()))
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select schemaname, relname, n_dead_tup from pg_stat_user_tables order by 3 desc
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from pg_locks l join pg_stat_activity a using (pid)
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select version()
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select current_user
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from information_schema.tables
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from orders limit 5 offset 10
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select generate_series(1, 10)
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select now()
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from orders tablesample system (10)
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select array_agg(id) from orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select count(*) filter (where total > 1) from orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from orders -- trailing comment
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: /* leading comment */ select 1
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select 'delete from orders' as note
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select 'drop table x; delete from y' as s
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from orders where note = 'insert into t values (1)'
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select "update" from t
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select 1;
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select 1 -- ; delete from orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select 1 /* ; drop table t */
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select 1;;
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from orders where id in (select order_id from items)
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select lower(name) from customers order by 1
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from orders fetch first 5 rows only
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select cast(total as numeric(10,2)) from orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select total::int from orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select to_char(created_at, 'YYYY-MM') from orders
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select date_trunc('day', created_at), count(*) from orders group by 1
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: select * from svv_table_info order by size desc limit 20
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select * from stl_load_errors order by starttime desc limit 5
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select listagg(name, ',') within group (order by name) from customers
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select getdate()
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select * from stv_wlm_query_state
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select * from svv_all_columns where table_name = 'orders'
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select * from sys_query_history where status = 'failed'
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select * from pg_catalog.pg_tables
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select trunc(getdate())
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select dateadd(day, -1, getdate())
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select datediff(day, a, b) from t
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select * from stl_alert_event_log
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: with q as (select * from stv_recents) select * from q
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select sum(size) from svv_table_info
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: select nvl(a, 0) from t
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: show search_path
+  dialect: postgres
+  kind: read
+  type: SHOW
+- sql: show all
+  dialect: postgres
+  kind: read
+  type: SHOW
+- sql: show statement_timeout
+  dialect: postgres
+  kind: read
+  type: SHOW
+- sql: SHOW server_version
+  dialect: postgres
+  kind: read
+  type: SHOW
+- sql: explain select 1
+  dialect: postgres
+  kind: read
+  type: EXPLAIN
+- sql: explain select * from orders where id = 1
+  dialect: postgres
+  kind: read
+  type: EXPLAIN
+- sql: explain verbose select 1
+  dialect: postgres
+  kind: read
+  type: EXPLAIN
+- sql: explain (format json) select * from orders
+  dialect: postgres
+  kind: read
+  type: EXPLAIN
+- sql: explain (costs off) select 1
+  dialect: postgres
+  kind: read
+  type: EXPLAIN
+- sql: explain select * from orders
+  dialect: redshift
+  kind: read
+  type: EXPLAIN
+- sql: show all
+  dialect: redshift
+  kind: read
+  type: SHOW
+- sql: \d
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \d orders
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \d+ orders
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \dt
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \dt+ analytics.*
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \dn
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \df
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \dv
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \di
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \l
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \l+
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \x
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \timing
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \conninfo
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \dx
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \du
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \dp orders
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \sf my_func
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \z orders
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \?
+  dialect: postgres
+  kind: read
+  type: META
+- sql: \q
+  dialect: postgres
+  kind: read
+  type: META
+- sql: insert into orders values (1, 10)
+  dialect: postgres
+  kind: write
+  type: INSERT
+- sql: insert into orders select * from staging_orders
+  dialect: postgres
+  kind: write
+  type: INSERT
+- sql: insert into orders (id) values (1) on conflict do nothing
+  dialect: postgres
+  kind: write
+  type: INSERT
+- sql: update orders set total = 0
+  dialect: postgres
+  kind: write
+  type: UPDATE
+- sql: update orders set total = 0 where id = 1
+  dialect: postgres
+  kind: write
+  type: UPDATE
+- sql: update orders o set total = s.total from staging s where s.id = o.id
+  dialect: postgres
+  kind: write
+  type: UPDATE
+- sql: delete from orders
+  dialect: postgres
+  kind: write
+  type: DELETE
+- sql: delete from orders where id = 1
+  dialect: postgres
+  kind: write
+  type: DELETE
+- sql: DELETE FROM orders USING customers c WHERE c.id = orders.customer_id
+  dialect: postgres
+  kind: write
+  type: DELETE
+- sql: merge into orders o using staging s on o.id = s.id when matched then update set total = s.total when not matched then insert values (s.id, s.total)
+  dialect: postgres
+  kind: write
+  type: MERGE
+- sql: truncate orders
+  dialect: postgres
+  kind: write
+  type: TRUNCATE
+- sql: truncate table orders
+  dialect: postgres
+  kind: write
+  type: TRUNCATE
+- sql: truncate orders, customers
+  dialect: postgres
+  kind: write
+  type: TRUNCATE
+- sql: with d as (delete from orders where id = 1 returning *) select * from d
+  dialect: postgres
+  kind: write
+  type: DELETE
+- sql: with u as (update orders set total = 0 returning id) select * from u
+  dialect: postgres
+  kind: write
+  type: UPDATE
+- sql: with i as (insert into orders values (1, 2) returning id) select * from i
+  dialect: postgres
+  kind: write
+  type: INSERT
+- sql: with x as (select 1) delete from orders using x
+  dialect: postgres
+  kind: write
+  type: DELETE
+- sql: with x as (select id from orders) update orders set total = 0 where id in (select id from x)
+  dialect: postgres
+  kind: write
+  type: UPDATE
+- sql: with x as (select id from customers) insert into orders select id, 0 from x
+  dialect: postgres
+  kind: write
+  type: INSERT
+- sql: with a as (select 1), b as (delete from t returning *) select * from a
+  dialect: postgres
+  kind: write
+  type: DELETE
+- sql: with d as (delete from orders returning *) insert into orders_archive select * from d
+  dialect: postgres
+  kind: write
+  type: INSERT
+- sql: select * into backup_orders from orders
+  dialect: postgres
+  kind: write
+  type: SELECT INTO
+- sql: select id into temp t1 from orders
+  dialect: postgres
+  kind: write
+  type: SELECT INTO
+- sql: select * into new_t from (select 1) s
+  dialect: postgres
+  kind: write
+  type: SELECT INTO
+- sql: select * from orders for update
+  dialect: postgres
+  kind: write
+  type: SELECT FOR UPDATE
+- sql: select * from orders where id = 1 for share
+  dialect: postgres
+  kind: write
+  type: SELECT FOR UPDATE
+- sql: select pg_terminate_backend(123)
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select pg_cancel_backend(pid) from pg_stat_activity
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select nextval('seq')
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select setval('seq', 1)
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select set_config('search_path', 'x', false)
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select pg_reload_conf()
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select pg_advisory_lock(1)
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select lo_import('/etc/passwd')
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select dblink_exec('host=x', 'drop table t')
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select pg_read_file('/etc/passwd')
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: select * from orders where id = (select nextval('seq'))
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: explain analyze select 1
+  dialect: postgres
+  kind: write
+  type: EXPLAIN ANALYZE
+- sql: EXPLAIN ANALYSE select 1
+  dialect: postgres
+  kind: write
+  type: EXPLAIN ANALYZE
+- sql: explain (analyze) select * from orders
+  dialect: postgres
+  kind: write
+  type: EXPLAIN ANALYZE
+- sql: explain (analyze, buffers) select 1
+  dialect: postgres
+  kind: write
+  type: EXPLAIN ANALYZE
+- sql: explain analyze delete from orders
+  dialect: postgres
+  kind: write
+  type: EXPLAIN ANALYZE
+- sql: explain (analyze true, verbose) update orders set total = 0
+  dialect: postgres
+  kind: write
+  type: EXPLAIN ANALYZE
+- sql: explain (analyze false) select 1
+  dialect: postgres
+  kind: write
+  type: EXPLAIN ANALYZE
+- sql: explain analyze select * from orders
+  dialect: redshift
+  kind: write
+  type: EXPLAIN ANALYZE
+- sql: call refresh_orders()
+  dialect: postgres
+  kind: write
+  type: CALL
+- sql: call analytics.load_daily('2024-01-01')
+  dialect: postgres
+  kind: write
+  type: CALL
+- sql: CALL p(1, 2)
+  dialect: postgres
+  kind: write
+  type: CALL
+- sql: do $$ begin delete from t; end $$
+  dialect: postgres
+  kind: write
+  type: DO
+- sql: execute my_stmt
+  dialect: postgres
+  kind: write
+  type: EXECUTE
+- sql: prepare p as select 1
+  dialect: postgres
+  kind: write
+  type: PREPARE
+- sql: deallocate p
+  dialect: postgres
+  kind: write
+  type: DEALLOCATE
+- sql: listen chan
+  dialect: postgres
+  kind: write
+  type: LISTEN
+- sql: notify chan
+  dialect: postgres
+  kind: write
+  type: NOTIFY
+- sql: call analytics.load_daily('2024-01-01')
+  dialect: redshift
+  kind: write
+  type: CALL
+- sql: vacuum
+  dialect: postgres
+  kind: write
+  type: VACUUM
+- sql: vacuum orders
+  dialect: postgres
+  kind: write
+  type: VACUUM
+- sql: vacuum full orders
+  dialect: postgres
+  kind: write
+  type: VACUUM
+- sql: vacuum (analyze) orders
+  dialect: postgres
+  kind: write
+  type: VACUUM
+- sql: analyze
+  dialect: postgres
+  kind: write
+  type: ANALYZE
+- sql: analyze orders
+  dialect: postgres
+  kind: write
+  type: ANALYZE
+- sql: analyze verbose orders
+  dialect: postgres
+  kind: write
+  type: ANALYZE
+- sql: reindex table orders
+  dialect: postgres
+  kind: write
+  type: REINDEX
+- sql: cluster orders
+  dialect: postgres
+  kind: write
+  type: CLUSTER
+- sql: refresh materialized view daily_orders
+  dialect: postgres
+  kind: write
+  type: REFRESH
+- sql: lock table orders
+  dialect: postgres
+  kind: write
+  type: LOCK
+- sql: vacuum delete only orders
+  dialect: redshift
+  kind: write
+  type: VACUUM
+- sql: vacuum sort only orders
+  dialect: redshift
+  kind: write
+  type: VACUUM
+- sql: analyze compression orders
+  dialect: redshift
+  kind: write
+  type: UNPARSEABLE
+- sql: analyze orders predicate columns
+  dialect: redshift
+  kind: write
+  type: ANALYZE
+- sql: vacuum recluster orders
+  dialect: redshift
+  kind: write
+  type: VACUUM
+- sql: copy orders from '/tmp/orders.csv' with csv
+  dialect: postgres
+  kind: write
+  type: COPY
+- sql: copy orders to '/tmp/o.csv'
+  dialect: postgres
+  kind: write
+  type: COPY
+- sql: copy (select * from orders) to stdout
+  dialect: postgres
+  kind: write
+  type: COPY
+- sql: copy orders from program 'cat /etc/passwd'
+  dialect: postgres
+  kind: write
+  type: COPY
+- sql: copy orders from stdin
+  dialect: postgres
+  kind: write
+  type: COPY
+- sql: copy orders from 's3://bucket/orders/' iam_role 'arn:aws:iam::123456789012:role/loader' csv
+  dialect: redshift
+  kind: write
+  type: COPY
+- sql: copy orders from 's3://bucket/orders/' credentials 'aws_access_key_id=x;aws_secret_access_key=y' gzip
+  dialect: redshift
+  kind: write
+  type: COPY
+- sql: unload ('select * from orders') to 's3://bucket/out/' iam_role 'arn:aws:iam::123456789012:role/unloader'
+  dialect: redshift
+  kind: write
+  type: UNLOAD
+- sql: unload ('select * from orders') to 's3://bucket/out/' iam_role 'arn:aws:iam::123456789012:role/unloader' parquet
+  dialect: redshift
+  kind: write
+  type: UNLOAD
+- sql: unload ('select 1') to 's3://bucket/x' iam_role 'r'
+  dialect: postgres
+  kind: write
+  type: UNPARSEABLE
+- sql: grant select on orders to analyst
+  dialect: postgres
+  kind: write
+  type: GRANT
+- sql: grant all on schema analytics to analyst
+  dialect: postgres
+  kind: write
+  type: GRANT
+- sql: grant usage on schema analytics to analyst
+  dialect: postgres
+  kind: write
+  type: GRANT
+- sql: revoke select on orders from analyst
+  dialect: postgres
+  kind: write
+  type: REVOKE
+- sql: revoke all on schema analytics from analyst
+  dialect: postgres
+  kind: write
+  type: REVOKE
+- sql: set role admin
+  dialect: postgres
+  kind: write
+  type: SET ROLE
+- sql: SET ROLE postgres
+  dialect: postgres
+  kind: write
+  type: SET ROLE
+- sql: set session role admin
+  dialect: postgres
+  kind: write
+  type: SET ROLE
+- sql: set local role admin
+  dialect: postgres
+  kind: write
+  type: SET ROLE
+- sql: set session authorization admin
+  dialect: postgres
+  kind: write
+  type: SET ROLE
+- sql: reset role
+  dialect: postgres
+  kind: write
+  type: RESET
+- sql: grant select on orders to group analysts
+  dialect: redshift
+  kind: write
+  type: GRANT
+- sql: set role admin
+  dialect: redshift
+  kind: write
+  type: SET ROLE
+- sql: create table t (a int)
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create table analytics.t as select * from orders
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create temp table t as select 1
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create view v as select 1
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create materialized view mv as select 1
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create index i on orders (id)
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create schema analytics
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create function f() returns int as $$ select 1 $$ language sql
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create user bob password 'x'
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create role r
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create database d
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: create extension pgcrypto
+  dialect: postgres
+  kind: write
+  type: CREATE
+- sql: drop table orders
+  dialect: postgres
+  kind: write
+  type: DROP
+- sql: drop table if exists orders cascade
+  dialect: postgres
+  kind: write
+  type: DROP
+- sql: drop schema analytics cascade
+  dialect: postgres
+  kind: write
+  type: DROP
+- sql: drop view v
+  dialect: postgres
+  kind: write
+  type: DROP
+- sql: drop index i
+  dialect: postgres
+  kind: write
+  type: DROP
+- sql: drop database d
+  dialect: postgres
+  kind: write
+  type: DROP
+- sql: drop user bob
+  dialect: postgres
+  kind: write
+  type: DROP
+- sql: alter table orders add column note text
+  dialect: postgres
+  kind: write
+  type: ALTER
+- sql: alter table orders drop column note
+  dialect: postgres
+  kind: write
+  type: ALTER
+- sql: alter table orders rename to o2
+  dialect: postgres
+  kind: write
+  type: ALTER
+- sql: alter user bob with password 'x'
+  dialect: postgres
+  kind: write
+  type: ALTER
+- sql: alter table orders owner to admin
+  dialect: postgres
+  kind: write
+  type: ALTER
+- sql: comment on table orders is 'x'
+  dialect: postgres
+  kind: write
+  type: COMMENT
+- sql: alter system set work_mem = '1GB'
+  dialect: postgres
+  kind: write
+  type: ALTER
+- sql: create table t (a int) diststyle key distkey(a) sortkey(a)
+  dialect: redshift
+  kind: write
+  type: CREATE
+- sql: create table t (a int encode zstd, b varchar(10) encode lzo) diststyle all
+  dialect: redshift
+  kind: write
+  type: CREATE
+- sql: create table t (a int) diststyle even
+  dialect: redshift
+  kind: write
+  type: CREATE
+- sql: create external schema spectrum from data catalog database 'd' iam_role 'arn:aws:iam::123456789012:role/r'
+  dialect: redshift
+  kind: write
+  type: CREATE
+- sql: create external table spectrum.t (a int) stored as parquet location 's3://bucket/t/'
+  dialect: redshift
+  kind: write
+  type: CREATE
+- sql: create materialized view mv auto refresh yes as select 1
+  dialect: redshift
+  kind: write
+  type: CREATE
+- sql: alter table orders alter diststyle all
+  dialect: redshift
+  kind: write
+  type: ALTER
+- sql: alter table orders alter sortkey (a)
+  dialect: redshift
+  kind: write
+  type: ALTER
+- sql: alter table orders append from staging
+  dialect: redshift
+  kind: write
+  type: ALTER
+- sql: refresh materialized view mv
+  dialect: redshift
+  kind: write
+  type: REFRESH
+- sql: create table t as select * from orders
+  dialect: redshift
+  kind: write
+  type: CREATE
+- sql: drop table t
+  dialect: redshift
+  kind: write
+  type: DROP
+- sql: truncate table orders
+  dialect: redshift
+  kind: write
+  type: TRUNCATE
+- sql: delete from orders where id = 1
+  dialect: redshift
+  kind: write
+  type: DELETE
+- sql: insert into orders select * from staging
+  dialect: redshift
+  kind: write
+  type: INSERT
+- sql: update orders set total = 0
+  dialect: redshift
+  kind: write
+  type: UPDATE
+- sql: select * into t from orders
+  dialect: redshift
+  kind: write
+  type: SELECT INTO
+- sql: create or replace procedure p() as $$ begin delete from t; end $$ language plpgsql
+  dialect: redshift
+  kind: write
+  type: CREATE
+- sql: begin
+  dialect: postgres
+  kind: read
+  type: BEGIN
+- sql: begin transaction
+  dialect: postgres
+  kind: read
+  type: BEGIN
+- sql: commit
+  dialect: postgres
+  kind: read
+  type: COMMIT
+- sql: rollback
+  dialect: postgres
+  kind: read
+  type: ROLLBACK
+- sql: end
+  dialect: postgres
+  kind: read
+  type: COMMIT
+- sql: start transaction
+  dialect: postgres
+  kind: read
+  type: BEGIN
+- sql: \copy orders from 'o.csv' csv
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \copy orders to 'o.csv'
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \! rm -rf /
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \i script.sql
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \ir script.sql
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \o out.txt
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \set x 1
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \c otherdb
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \gexec
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \w file
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \e
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \password bob
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \lo_import f
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \g
+  dialect: postgres
+  kind: write
+  type: META
+- sql: \watch 5
+  dialect: postgres
+  kind: write
+  type: META
+- sql: select 1 \gexec
+  dialect: postgres
+  kind: write
+  type: META
+- sql: select 'x' \g out.txt
+  dialect: postgres
+  kind: write
+  type: META
+- sql: select 1; delete from orders
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - DELETE
+- sql: delete from orders; select 1
+  dialect: postgres
+  kind:
+  - write
+  - read
+  type:
+  - DELETE
+  - SELECT
+- sql: select 1; select 2; drop table t
+  dialect: postgres
+  kind:
+  - read
+  - read
+  - write
+  type:
+  - SELECT
+  - SELECT
+  - DROP
+- sql: 'select 1;
+
+    select 2;
+
+    insert into t values (1);'
+  dialect: postgres
+  kind:
+  - read
+  - read
+  - write
+- sql: "select 1; -- comment\n update orders set total = 0"
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - UPDATE
+- sql: select 1 /* x */; truncate orders
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - TRUNCATE
+- sql: select * from orders; call purge()
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - CALL
+- sql: select 1; grant all on orders to public
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - GRANT
+- sql: select 1; vacuum
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - VACUUM
+- sql: select 1; set role admin
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - SET ROLE
+- sql: select 1; select 2
+  dialect: postgres
+  kind:
+  - read
+  - read
+- sql: ''
+  dialect: postgres
+  kind: []
+- sql: ;
+  dialect: postgres
+  kind: []
+- sql: "   \n  "
+  dialect: postgres
+  kind: []
+- sql: ' ;; '
+  dialect: postgres
+  kind: []
+- sql: values (1), (2), (3)
+  dialect: postgres
+  kind: read
+  type: VALUES
+- sql: select 1;\dt
+  dialect: postgres
+  kind:
+  - read
+  - read
+- sql: '\dt
+
+    select 1'
+  dialect: postgres
+  kind:
+  - read
+  - read
+- sql: '\dt
+
+    delete from t'
+  dialect: postgres
+  kind:
+  - read
+  - write
+- sql: 'select 1;
+
+    \copy t from ''f'''
+  dialect: postgres
+  kind:
+  - read
+  - write
+- sql: select 1; select * into x from t
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - SELECT INTO
+- sql: select 1; explain analyze select 1
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - EXPLAIN ANALYZE
+- sql: select 1; select 2; select 3; select 4; delete from t
+  dialect: postgres
+  kind:
+  - read
+  - read
+  - read
+  - read
+  - write
+- sql: select 1; delete from t
+  dialect: redshift
+  kind:
+  - read
+  - write
+- sql: /* harmless */ delete from orders
+  dialect: postgres
+  kind: write
+  type: DELETE
+- sql: '-- note
+
+    delete from orders'
+  dialect: postgres
+  kind: write
+  type: DELETE
+- sql: /* select */ update orders set total = 0
+  dialect: postgres
+  kind: write
+  type: UPDATE
+- sql: '-- select 1
+
+    truncate orders'
+  dialect: postgres
+  kind: write
+  type: TRUNCATE
+- sql: '-- safe select
+
+    select 1'
+  dialect: postgres
+  kind:
+  - read
+- sql: /* delete from t */ select 1
+  dialect: postgres
+  kind:
+  - read
+- sql: /*+ hint */ insert into t values (1)
+  dialect: postgres
+  kind: write
+  type: INSERT
+- sql: garbage in !!
+  dialect: postgres
+  kind: write
+- sql: selec 1
+  dialect: postgres
+  kind: write
+- sql: select from where
+  dialect: postgres
+  kind: write
+- sql: delete orders where
+  dialect: postgres
+  kind: write
+- sql: asdf qwer zxcv
+  dialect: postgres
+  kind: write
+- sql: select * from (
+  dialect: postgres
+  kind: write
+- sql: select 1 +
+  dialect: postgres
+  kind: write
+- sql: ((((
+  dialect: postgres
+  kind: write
+- sql: drop
+  dialect: postgres
+  kind: write
+- sql: select 'unterminated
+  dialect: postgres
+  kind: write
+- sql: insert into
+  dialect: postgres
+  kind: write
+- sql: '<unreadable: file /nope.sql>'
+  dialect: postgres
+  kind: write
+- sql: '<unreadable: SQL piped on stdin>'
+  dialect: postgres
+  kind: write
+- sql: $SQL
+  dialect: postgres
+  kind: write
+- sql: $(cat file.sql)
+  dialect: postgres
+  kind: write
+- sql: '`cat f.sql`'
+  dialect: postgres
+  kind: write
+- sql: '''; drop table t; --'
+  dialect: postgres
+  kind: write
+- sql: garbage in !!
+  dialect: redshift
+  kind: write
+  type: UNPARSEABLE
+- sql: select 1; garbage in !!
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SELECT
+  - UNPARSEABLE
+- sql: select * from `proj.ds.t`
+  dialect: bigquery
+  kind: read
+  type: SELECT
+- sql: select * from orders
+  dialect: athena
+  kind: read
+  type: SELECT
+- sql: select 1
+  dialect: bigquery
+  kind: read
+  type: SELECT
+- sql: delete from ds.t where true
+  dialect: bigquery
+  kind: write
+  type: DELETE
+- sql: drop table ds.t
+  dialect: athena
+  kind: write
+  type: DROP
+- sql: insert into t values (1)
+  dialect: athena
+  kind: write
+  type: INSERT
+- sql: create table t as select 1
+  dialect: athena
+  kind: write
+  type: CREATE
+- sql: set statement_timeout = 1000
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set statement_timeout to '2min'
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: SET SESSION statement_timeout = 1
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set local lock_timeout = 5
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set idle_in_transaction_session_timeout = 0
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set search_path to analytics
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set search_path = analytics, public
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set timezone = 'UTC'
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set time zone 'UTC'
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set session time zone 'UTC'
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set application_name = 'agent'
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set work_mem = '64MB'
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set datestyle = 'iso'
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set intervalstyle = 'iso_8601'
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set extra_float_digits = 3
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set client_encoding to 'UTF8'
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set client_min_messages to warning
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set enable_seqscan = off
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set enable_nestloop to off
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: SET JIT = off
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set max_parallel_workers_per_gather = 0
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set transaction read only
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set session characteristics as transaction read only
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: reset statement_timeout
+  dialect: postgres
+  kind: read
+  type: RESET
+- sql: reset search_path
+  dialect: postgres
+  kind: read
+  type: RESET
+- sql: reset enable_seqscan
+  dialect: postgres
+  kind: read
+  type: RESET
+- sql: set statement_timeout = default
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: SET Statement_Timeout = 5
+  dialect: postgres
+  kind: read
+  type: SET
+- sql: set query_group to 'dash'
+  dialect: redshift
+  kind: read
+  type: SET
+- sql: set enable_result_cache_for_session to off
+  dialect: redshift
+  kind: read
+  type: SET
+- sql: reset query_group
+  dialect: redshift
+  kind: read
+  type: RESET
+- sql: set search_path to analytics
+  dialect: redshift
+  kind: read
+  type: SET
+- sql: show statement_timeout
+  dialect: postgres
+  kind: read
+  type: SHOW
+- sql: show timezone
+  dialect: postgres
+  kind: read
+  type: SHOW
+- sql: show time zone
+  dialect: postgres
+  kind: read
+  type: SHOW
+- sql: show transaction isolation level
+  dialect: postgres
+  kind: read
+  type: SHOW
+- sql: show search_path
+  dialect: postgres
+  kind: read
+  type: SHOW
+- sql: set statement_timeout = 120000; select * from orders
+  dialect: postgres
+  kind:
+  - read
+  - read
+  type:
+  - SET
+  - SELECT
+- sql: set search_path to analytics; select 1; reset search_path
+  dialect: postgres
+  kind:
+  - read
+  - read
+  - read
+- sql: set statement_timeout = 120000; delete from t
+  dialect: postgres
+  kind:
+  - read
+  - write
+  type:
+  - SET
+  - DELETE
+- sql: set statement_timeout = 1; select 1
+  dialect: redshift
+  kind:
+  - read
+  - read
+- sql: set role admin
+  dialect: postgres
+  kind: write
+  type: SET ROLE
+- sql: set session authorization admin
+  dialect: postgres
+  kind: write
+  type: SET ROLE
+- sql: reset role
+  dialect: postgres
+  kind: write
+  type: RESET
+- sql: reset session authorization
+  dialect: postgres
+  kind: write
+- sql: reset all
+  dialect: postgres
+  kind: write
+  type: RESET
+- sql: set default_transaction_read_only = off
+  dialect: postgres
+  kind: write
+  type: SET
+- sql: set default_transaction_read_only to false
+  dialect: postgres
+  kind: write
+  type: SET
+- sql: set transaction_read_only = off
+  dialect: postgres
+  kind: write
+  type: SET
+- sql: set session default_transaction_read_only = 0
+  dialect: postgres
+  kind: write
+  type: SET
+- sql: set transaction read write
+  dialect: postgres
+  kind: write
+  type: SET
+- sql: set x = 1
+  dialect: postgres
+  kind: write
+  type: SET
+- sql: set some_extension.flag = 'on'
+  dialect: postgres
+  kind: write
+- sql: set statement_timeout = (select 1)
+  dialect: postgres
+  kind: write
+  type: SET
+- sql: set search_path to (select 1)
+  dialect: postgres
+  kind: write
+- sql: set transaction isolation level serializable
+  dialect: postgres
+  kind: write
+  type: SET
+- sql: set names 'utf8'
+  dialect: postgres
+  kind: write
+- sql: set statement_timeout from current
+  dialect: postgres
+  kind: write
+- sql: select set_config('statement_timeout', '1', false)
+  dialect: postgres
+  kind: write
+  type: SELECT
+- sql: set session characteristics as transaction read write
+  dialect: postgres
+  kind: write
+- sql: begin read only
+  dialect: postgres
+  kind: read
+  type: BEGIN
+- sql: begin read write
+  dialect: postgres
+  kind: read
+  type: BEGIN
+- sql: begin transaction read only
+  dialect: postgres
+  kind: read
+  type: BEGIN
+- sql: begin isolation level serializable
+  dialect: postgres
+  kind: read
+  type: BEGIN
+- sql: start transaction read only
+  dialect: postgres
+  kind: read
+  type: BEGIN
+- sql: start transaction read write
+  dialect: postgres
+  kind: read
+  type: BEGIN
+- sql: commit work
+  dialect: postgres
+  kind: read
+  type: COMMIT
+- sql: commit transaction
+  dialect: postgres
+  kind: read
+  type: COMMIT
+- sql: abort
+  dialect: postgres
+  kind: read
+  type: ROLLBACK
+- sql: rollback work
+  dialect: postgres
+  kind: read
+  type: ROLLBACK
+- sql: savepoint s1
+  dialect: postgres
+  kind: read
+  type: SAVEPOINT
+- sql: release savepoint s1
+  dialect: postgres
+  kind: read
+  type: RELEASE
+- sql: release s1
+  dialect: postgres
+  kind: read
+  type: RELEASE
+- sql: rollback to savepoint s1
+  dialect: postgres
+  kind: read
+  type: ROLLBACK
+- sql: rollback to s1
+  dialect: postgres
+  kind: read
+  type: ROLLBACK
+- sql: commit prepared 'tx1'
+  dialect: postgres
+  kind: write
+  type: UNPARSEABLE
+- sql: rollback prepared 'tx1'
+  dialect: postgres
+  kind: write
+  type: UNPARSEABLE
+- sql: '$$$$ ;;; ###'
+  dialect: postgres
+  kind:
+  - write
+  - write
+- sql: BEGIN; DELETE FROM t; COMMIT
+  dialect: postgres
+  kind:
+  - read
+  - write
+  - read
+  type:
+  - BEGIN
+  - DELETE
+  - COMMIT
+- sql: begin read only; select 1; commit
+  dialect: postgres
+  kind:
+  - read
+  - read
+  - read
+- sql: begin; update t set a = 1; rollback
+  dialect: postgres
+  kind:
+  - read
+  - write
+  - read
+- sql: begin; select 1; savepoint s; drop table t; rollback to s; end
+  dialect: postgres
+  kind:
+  - read
+  - read
+  - read
+  - write
+  - read
+  - read
+- sql: start transaction read only; select * from orders; commit;
+  dialect: redshift
+  kind:
+  - read
+  - read
+  - read
+- sql: begin; set role admin; commit
+  dialect: postgres
+  kind:
+  - read
+  - write
+  - read
+- sql: table t
+  dialect: postgres
+  kind: read
+  type: TABLE
+- sql: table orders
+  dialect: postgres
+  kind: read
+  type: TABLE
+- sql: table analytics.orders
+  dialect: postgres
+  kind: read
+  type: TABLE
+- sql: TABLE only orders
+  dialect: postgres
+  kind: read
+  type: TABLE
+- sql: describe orders
+  dialect: postgres
+  kind: read
+  type: DESCRIBE
+- sql: desc orders
+  dialect: postgres
+  kind: read
+  type: DESCRIBE
+- sql: table t
+  dialect: redshift
+  kind: read
+  type: TABLE
+- sql: table t; delete from t
+  dialect: postgres
+  kind:
+  - read
+  - write
+- sql: select 1; select 2; garbage in !!
+  dialect: postgres
+  kind:
+  - read
+  - read
+  - write
+- sql: select ';' ; select 'a;b'
+  dialect: postgres
+  kind:
+  - read
+  - read
+- sql: select $$a;b$$; delete from t
+  dialect: postgres
+  kind:
+  - read
+  - write

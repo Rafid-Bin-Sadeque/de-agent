@@ -1,0 +1,12 @@
+line-length = 100
+target-version = "py39"
+extend-exclude = ["scripts/_vendor", "cli/tests/fixtures"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B905"]  # B905: zip(strict=) is 3.10+, hook path stays 3.9-safe
+
+[lint.per-file-ignores]
+"cli/src/de_agent/cli.py" = ["B008"]  # typer idiom
+"cli/src/de_agent/collectors/_airflow_core.py" = ["UP"]  # shipped to remote hosts: stays 3.8-compatible
+"cli/src/de_agent/collectors/aws/_aws_core.py" = ["UP"]  # shipped to remote hosts: stays 3.8-compatible

@@ -1,0 +1,20 @@
+# de-agent config. Secrets are REFERENCES only: pgpass | env:NAME | file:/abs/path (mode 0600) | none
+version: 1
+hub: {name: "{{name}}", map_budget_tokens: 1500, snapshot_max_age_hours: 24, retention: 30}
+sources: []
+# sources:
+#   - name: warehouse            # unique, [a-z0-9_-]+
+#     type: postgres
+#     exec: local                # local | ssh:<host-alias>  (ssh needs password: pgpass on that host)
+#     timeout_seconds: 120
+#     conn: {host: localhost, port: 5432, dbname: shop, user: readonly_agent, password: pgpass, sslmode: prefer}
+#     options: {schemas: [public], top_tables: 25}
+#   - name: dwh                  # Redshift: PG wire (conn) or the Data API (data_api + aws); see docs/collectors.md
+#     type: redshift
+#     timeout_seconds: 600
+#     conn: {host: example.redshift.internal, port: 5439, dbname: dev, user: readonly_agent, password: pgpass}
+#   - name: aws_main             # DMS, Glue, S3 (named prefixes), Athena, Firehose, CloudWatch alarms
+#     type: aws
+#     aws: {profile: readonly, region: us-east-1}   # or {instance_role: true} with exec: ssh:<host>
+#     services: {dms: {}, firehose: {}, cloudwatch: {alarms: true}}
+guard: {mode: strict}          # strict = deny writes outside an approved plan | ask = prompt

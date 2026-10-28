@@ -1,0 +1,46 @@
+{
+  "collected_at": "2026-10-27T09:00:00Z",
+  "data": {
+    "blocking": [],
+    "databases": [
+      {
+        "name": "shop",
+        "size_bytes": 8192000
+      }
+    ],
+    "long_queries": [],
+    "meta": {
+      "long_query_seconds": 300,
+      "top_tables": 25
+    },
+    "replication_slots": [],
+    "schemas": [
+      {
+        "name": "shop",
+        "table_count": 2,
+        "total_bytes": 4096000
+      }
+    ],
+    "server": {
+      "cache_hit_pct": 99.7,
+      "connections": {
+        "active": 1,
+        "idle": 6
+      },
+      "connections_total": 7,
+      "max_connections": 100,
+      "oldest_xid_age": 1000000,
+      "uptime_s": 4000,
+      "version": "PostgreSQL 14.12 on aarch64",
+      "xid_wraparound_pct": 0.05
+    },
+    "settings": [],
+    "tables": [],
+    "unused_indexes": []
+  },
+  "duration_s": 0.8,
+  "errors": [],
+  "schema_version": 1,
+  "source": "warehouse",
+  "type": "postgres"
+}

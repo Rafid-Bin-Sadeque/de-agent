@@ -1,0 +1,1 @@
+| [[orders_etl]] | nightly orders and customers load | the warehouse |

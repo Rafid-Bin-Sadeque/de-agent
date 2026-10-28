@@ -1,0 +1,27 @@
+name: demo
+# End-to-end against the Acme Shop demo stack (docker compose, ~3 GB RAM, about 10 minutes). Manual + nightly.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e 'cli[dev]'
+      - name: scan perf (1,000-DAG synthetic repo)
+        run: pytest -m perf -s cli/tests/test_scan_perf.py
+      - name: demo e2e (6 seeded faults)
+        env:
+          DEA_DEMO: "1"
+          DEA_DEMO_DOWN: "1"
+        run: pytest -m demo -s cli/tests/test_demo_e2e.py
+      - name: demo logs on failure
+        if: failure()
+        run: docker compose -f demo/docker-compose.yml --env-file demo/.env logs --no-color --tail 200

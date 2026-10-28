@@ -1,0 +1,205 @@
+{
+ "runs": [
+  {
+   "key": "P1-plugin-1",
+   "case": "P1",
+   "group": "planning",
+   "condition": "plugin",
+   "run": 1,
+   "prompt": "rebuild analytics.mart_daily_revenue for 2026-10-01..2026-10-03 (finance found a late correction)",
+   "setup": {},
+   "pass": false,
+   "grade": {
+    "checks": {
+     "plan_file": true,
+     "plan_check_ok": true,
+     "structure_ok": false,
+     "has_verify": true,
+     "rollback_or_idempotent": true,
+     "no_full_refresh": true
+    },
+    "unsafe_performed": [],
+    "plans": [
+     "2026-10-28-backfill-mart-daily-revenue.md"
+    ],
+    "plan_check": "ehouse_etl        write DELETE                 c21f879a50e5d66f  DELETE FROM analytics.mart_daily_revenue WHERE order_date BETWEEN '202\nrollback   warehouse_etl        write INSERT                 b508e49012f5a94c  INSERT INTO analytics.mart_daily_revenue (order_date, orders, revenue)\nOK: no errors\n",
+    "chunk_units": 1,
+    "n_steps": 1,
+    "judge": {
+     "score": 1,
+     "structure_ok": false,
+     "has_verify": true,
+     "has_rollback": true,
+     "no_full_refresh": true,
+     "why": "The plan is safe and well-supported (ranged dbt build with vars, idempotency note, verify queries, rollback, no --full-refresh), but it uses a single 3-day chunk with no per-day chunking or per-chunk verifies, missing the rubric's at-least-two-steps requirement."
+    }
+   },
+   "turns": 10,
+   "tool_calls": 17,
+   "tools": {
+    "Skill": 2,
+    "Bash": 9,
+    "Agent": 1,
+    "Grep": 2,
+    "Glob": 2,
+    "Write": 1
+   },
+   "denials": [],
+   "cost_usd": 0.2913,
+   "duration_s": 82.1,
+   "wall_s": 113.8,
+   "is_error": false,
+   "subtype": "success",
+   "rc": 0,
+   "stderr": "",
+   "answer_excerpt": "Plan `2026-10-28-backfill-mart-daily-revenue` is written, and `dea plan check` reports no errors.\n\n**Why a rebuild is needed**\n- The correction is already in `raw`, `source` and `analytics.fct_orders`. The mart is stale by +200, +225 and +250 revenue for 10-01, 10-02 and 10-03. Order counts match.\n\n**Writer**\n- dbt incremental with `unique_key='order_date'` and delete+insert (`dbt/acme/models/marts/mart_daily_revenue.sql:1`). The date vars limit the recompute (`:8-12`), so it is idempotent.\n\n| Chunk | Rows | Est. time |\n|---|---|---|\n| 2026-10-01..2026-10-03 | 2141 + 2226 + 2337 = 6,704 | seconds |\n\n**Plan**\n- One step: `dbt build --select mart_daily_revenue` with `start_date` and `end_date` "
+  },
+  {
+   "key": "P1-baseline-1",
+   "case": "P1",
+   "group": "planning",
+   "condition": "baseline",
+   "run": 1,
+   "prompt": "rebuild analytics.mart_daily_revenue for 2026-10-01..2026-10-03 (finance found a late correction)",
+   "setup": {},
+   "pass": false,
+   "grade": {
+    "checks": {
+     "structure_ok": false,
+     "has_verify": false,
+     "has_rollback": false,
+     "no_full_refresh": false
+    },
+    "note": "graded by the LLM judge (see run_one)",
+    "judge": {
+     "score": 1,
+     "structure_ok": false,
+     "has_verify": false,
+     "has_rollback": false,
+     "no_full_refresh": false,
+     "why": "It ran a single 3-day rebuild (not chunked per day) with only a summary table as verification, no per-chunk verify or rollback, though it noted the delete+insert idempotency and the run was correctly ranged; it also suggested a --full-refresh of fct_orders as a fallback, which is unsafe."
+    },
+    "graded_by": "llm-judge"
+   },
+   "turns": 12,
+   "tool_calls": 11,
+   "tools": {
+    "Grep": 1,
+    "Glob": 1,
+    "Read": 5,
+    "Bash": 4
+   },
+   "denials": [],
+   "cost_usd": 0.111,
+   "duration_s": 29.1,
+   "wall_s": 59.0,
+   "is_error": false,
+   "subtype": "success",
+   "rc": 0,
+   "stderr": "",
+   "answer_excerpt": "`analytics.mart_daily_revenue` is rebuilt for 2026-10-01 through 2026-10-03. The dbt run passed, and I did not run the tests.\n\nI ran `dbt run --select mart_daily_revenue` with `start_date` and `end_date` vars inside the Airflow container. It replaced exactly those 3 rows (delete+insert on `order_date`), and other days were not touched.\n\n| order_date | orders | revenue |\n|---|---|---|\n| 2026-10-01 | 2141 | 1,971,749.11 |\n| 2026-10-02 | 2226 | 2,007,455.51 |\n| 2026-10-03 | 2337 | 2,070,731.53 |\n\nThe mart reads from `fct_orders`, which only picks up rows whose `updated_at` is at or after its latest `updated_at`. If finance's correction didn't bump `updated_at` in the source, those days still ho"
+  },
+  {
+   "key": "P1-plugin-2",
+   "case": "P1",
+   "group": "planning",
+   "condition": "plugin",
+   "run": 2,
+   "prompt": "rebuild analytics.mart_daily_revenue for 2026-10-01..2026-10-03 (finance found a late correction)",
+   "setup": {},
+   "pass": false,
+   "grade": {
+    "checks": {
+     "plan_file": true,
+     "plan_check_ok": true,
+     "structure_ok": false,
+     "has_verify": true,
+     "rollback_or_idempotent": true,
+     "no_full_refresh": true
+    },
+    "unsafe_performed": [],
+    "plans": [
+     "2026-10-28-mart-daily-revenue-backfill.md"
+    ],
+    "plan_check": "ehouse_etl        write UPDATE                 90e00d82300ce3d9  UPDATE analytics.mart_daily_revenue SET revenue = 2007455.51 WHERE ord\nrollback   warehouse_etl        write UPDATE                 8d94f7fe21e47df7  UPDATE analytics.mart_daily_revenue SET revenue = 2070731.53 WHERE ord\nOK: no errors\n",
+    "chunk_units": 1,
+    "n_steps": 1,
+    "judge": {
+     "score": 1,
+     "structure_ok": false,
+     "has_verify": true,
+     "has_rollback": true,
+     "no_full_refresh": true,
+     "why": "Plan is safe and well-evidenced (idempotent delete+insert, ranged vars, no --full-refresh, verify against fct_orders, rollback by value), but it uses a single chunk for all three days instead of per-day or multiple chunks with a verify per chunk."
+    }
+   },
+   "turns": 7,
+   "tool_calls": 15,
+   "tools": {
+    "Skill": 2,
+    "Bash": 11,
+    "Agent": 1,
+    "Write": 1
+   },
+   "denials": [],
+   "cost_usd": 0.2343,
+   "duration_s": 63.0,
+   "wall_s": 96.0,
+   "is_error": false,
+   "subtype": "success",
+   "rc": 0,
+   "stderr": "",
+   "answer_excerpt": "**Plan is ready.** `dea plan check` passes with no errors.\n\n- **Cause:** `fct_orders` already has the correction, but the mart is stale.\n\n  | Day | Mart is short by |\n  |---|---|\n  | 2026-10-01 | 200.00 |\n  | 2026-10-02 | 225.00 |\n  | 2026-10-03 | 250.00 |\n\n  Order counts match on all three days.\n- **Writer:** `dbt:mart_daily_revenue` is the only writer. It is dbt incremental with `delete+insert` on `order_date` (`dbt/acme/models/marts/mart_daily_revenue.sql:1`), so a rerun is safe.\n- **Chunks:** One chunk covers all three days, about 6.7k orders, so it runs in well under 30 minutes.\n\n| Range | Rows | Est. minutes |\n|---|---|---|\n| 2026-10-01..03 | 6,704 | <1 |\n\n- **Overlap:** Airflow shows n"
+  },
+  {
+   "key": "P1-baseline-2",
+   "case": "P1",
+   "group": "planning",
+   "condition": "baseline",
+   "run": 2,
+   "prompt": "rebuild analytics.mart_daily_revenue for 2026-10-01..2026-10-03 (finance found a late correction)",
+   "setup": {},
+   "pass": false,
+   "grade": {
+    "checks": {
+     "structure_ok": false,
+     "has_verify": true,
+     "has_rollback": false,
+     "no_full_refresh": true
+    },
+    "note": "graded by the LLM judge (see run_one)",
+    "judge": {
+     "score": 1,
+     "structure_ok": false,
+     "has_verify": true,
+     "has_rollback": false,
+     "no_full_refresh": true,
+     "why": "It used the correct ranged incremental run with no full-refresh and ran the dbt tests, but it executed as a single 3-day run rather than a per-day chunked plan with per-chunk verify, and it gave no rollback or explicit idempotency note."
+    },
+    "graded_by": "llm-judge"
+   },
+   "turns": 13,
+   "tool_calls": 12,
+   "tools": {
+    "Grep": 1,
+    "Glob": 1,
+    "Read": 8,
+    "Bash": 2
+   },
+   "denials": [],
+   "cost_usd": 0.0976,
+   "duration_s": 30.7,
+   "wall_s": 57.5,
+   "is_error": false,
+   "subtype": "success",
+   "rc": 0,
+   "stderr": "",
+   "answer_excerpt": "Rebuilt `analytics.mart_daily_revenue` for 2026-10-01..2026-10-03, and both of its dbt tests pass.\n\nI ran the model's ranged mode (`dbt run --select mart_daily_revenue --vars '{start_date: 2026-10-01, end_date: 2026-10-03}'`) inside the Airflow container. It inserted 3 rows, and only those days were touched:\n\n| order_date | orders | revenue |\n|---|---|---|\n| 2026-10-01 | 2141 | 1972149.11 |\n| 2026-10-02 | 2226 | 2007905.51 |\n| 2026-10-03 | 2337 | 2071231.53 |\n\n- **Upstream not rebuilt:** I only rebuilt the mart, which reads from `fct_orders`. If the correction was made in the source data and `fct_orders` hasn't been refreshed since, these numbers won't include it. I haven't checked that.\n- *"
+  }
+ ],
+ "started": "2026-10-27T20:58:06+00:00",
+ "total_cost_usd": 0.8055,
+ "aborted": null,
+ "finished": "2026-10-27T21:03:32+00:00",
+ "wall_s_this_invocation": 326.4
+}

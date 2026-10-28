@@ -1,0 +1,243 @@
+{
+ "cassette": {
+  "/api/v2/assets?limit=100&offset=0": {
+   "body": {
+    "assets": [
+     {
+      "consuming_dags": [
+       {
+        "dag_id": "report"
+       }
+      ],
+      "id": 1,
+      "last_asset_event": {
+       "timestamp": "2026-10-25T02:00:00Z"
+      },
+      "name": "orders",
+      "producing_tasks": [
+       {
+        "dag_id": "orders_etl",
+        "task_id": "load_orders"
+       }
+      ],
+      "uri": "s3://lake/orders"
+     },
+     {
+      "consuming_dags": [
+       {
+        "dag_id": "report"
+       }
+      ],
+      "id": 2,
+      "last_asset_event": {
+       "timestamp": "2026-10-27T11:00:00Z"
+      },
+      "name": "items",
+      "producing_tasks": [],
+      "uri": "s3://lake/items"
+     }
+    ],
+    "total_entries": 2
+   },
+   "status": 200
+  },
+  "/api/v2/dags/orders_etl/dagRuns/scheduled__5/taskInstances/load_orders/logs/2?full_content=true": {
+   "body": {
+    "content": [
+     {
+      "event": "INFO starting load",
+      "timestamp": "2026-10-27T02:01:00Z"
+     },
+     {
+      "event": "connecting postgresql://etl:hunter2secret@db:5432/wh",
+      "timestamp": "x"
+     },
+     {
+      "event": "ERROR duplicate key value violates unique constraint",
+      "timestamp": "y"
+     }
+    ],
+    "continuation_token": null
+   },
+   "status": 200
+  },
+  "/api/v2/dags/orders_etl/dagRuns?limit=5&order_by=-start_date": {
+   "body": {
+    "dag_runs": [
+     {
+      "dag_run_id": "scheduled__5",
+      "end_date": "2026-10-27T02:20:00Z",
+      "logical_date": "2026-10-27T02:00:00Z",
+      "run_after": "2026-10-27T02:00:00Z",
+      "start_date": "2026-10-27T02:00:00Z",
+      "state": "failed"
+     },
+     {
+      "dag_run_id": "scheduled__4",
+      "end_date": "2026-10-26T02:02:00Z",
+      "logical_date": "2026-10-26T02:00:00Z",
+      "run_after": "2026-10-26T02:00:00Z",
+      "start_date": "2026-10-26T02:00:00Z",
+      "state": "success"
+     },
+     {
+      "dag_run_id": "scheduled__3",
+      "end_date": "2026-10-25T02:02:10Z",
+      "logical_date": "2026-10-25T02:00:00Z",
+      "run_after": "2026-10-25T02:00:00Z",
+      "start_date": "2026-10-25T02:00:00Z",
+      "state": "success"
+     },
+     {
+      "dag_run_id": "scheduled__2",
+      "end_date": "2026-10-24T02:01:50Z",
+      "logical_date": "2026-10-24T02:00:00Z",
+      "run_after": "2026-10-24T02:00:00Z",
+      "start_date": "2026-10-24T02:00:00Z",
+      "state": "success"
+     },
+     {
+      "dag_run_id": "scheduled__1",
+      "end_date": "2026-10-23T02:02:00Z",
+      "logical_date": "2026-10-23T02:00:00Z",
+      "run_after": "2026-10-23T02:00:00Z",
+      "start_date": "2026-10-23T02:00:00Z",
+      "state": "success"
+     }
+    ],
+    "total_entries": 5
+   },
+   "status": 200
+  },
+  "/api/v2/dags/stuck_hourly/dagRuns?limit=5&order_by=-start_date": {
+   "body": {
+    "dag_runs": [
+     {
+      "dag_run_id": "scheduled__9",
+      "end_date": "2026-10-27T05:01:00Z",
+      "logical_date": "2026-10-27T05:00:00Z",
+      "run_after": "2026-10-27T05:00:00Z",
+      "start_date": "2026-10-27T05:00:00Z",
+      "state": "success"
+     },
+     {
+      "dag_run_id": "scheduled__8",
+      "end_date": "2026-10-27T04:01:00Z",
+      "logical_date": "2026-10-27T04:00:00Z",
+      "run_after": "2026-10-27T04:00:00Z",
+      "start_date": "2026-10-27T04:00:00Z",
+      "state": "success"
+     }
+    ],
+    "total_entries": 2
+   },
+   "status": 200
+  },
+  "/api/v2/dags/~/dagRuns/~/taskInstances?limit=100&offset=0&start_date_gte=2026-10-26T12%3A00%3A00Z&state=failed&state=up_for_retry": {
+   "body": {
+    "task_instances": [
+     {
+      "dag_id": "orders_etl",
+      "dag_run_id": "scheduled__5",
+      "duration": 1140.5,
+      "map_index": -1,
+      "start_date": "2026-10-27T02:01:00Z",
+      "state": "failed",
+      "task_id": "load_orders",
+      "try_number": 2
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v2/dags?limit=100&offset=0&order_by=dag_id": {
+   "body": {
+    "dags": [
+     {
+      "dag_id": "orders_etl",
+      "fileloc": "/dags/orders_etl.py",
+      "has_import_errors": false,
+      "is_paused": false,
+      "is_stale": false,
+      "next_dagrun_run_after": "2026-10-28T02:00:00Z",
+      "owners": [
+       "data-eng"
+      ],
+      "tags": [
+       {
+        "name": "acme"
+       }
+      ],
+      "timetable_description": "At 02:00",
+      "timetable_summary": "0 2 * * *"
+     },
+     {
+      "dag_id": "stuck_hourly",
+      "fileloc": "/dags/stuck_hourly.py",
+      "has_import_errors": false,
+      "is_paused": false,
+      "is_stale": false,
+      "next_dagrun_run_after": "2026-10-27T07:00:00Z",
+      "owners": [
+       "data-eng"
+      ],
+      "tags": [],
+      "timetable_description": "Every hour",
+      "timetable_summary": "@hourly"
+     },
+     {
+      "dag_id": "old_dag",
+      "fileloc": "/dags/old.py",
+      "has_import_errors": false,
+      "is_paused": true,
+      "is_stale": true,
+      "next_dagrun_run_after": null,
+      "owners": [
+       "x"
+      ],
+      "tags": [],
+      "timetable_summary": "@daily"
+     }
+    ],
+    "total_entries": 3
+   },
+   "status": 200
+  },
+  "/api/v2/importErrors?limit=100&offset=0": {
+   "body": {
+    "import_errors": [
+     {
+      "filename": "/dags/broken.py",
+      "stack_trace": "Traceback\n  l1\n  l2\n  l3\n  l4\n  l5\nSyntaxError: x"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v2/pools?limit=100": {
+   "body": {
+    "pools": [
+     {
+      "name": "default_pool",
+      "occupied_slots": 3,
+      "queued_slots": 2,
+      "running_slots": 3,
+      "slots": 128
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v2/version": {
+   "body": {
+    "git_version": "hand-built",
+    "version": "3.0.2"
+   },
+   "status": 200
+  }
+ },
+ "now": "2026-10-27T12:00:00Z"
+}

@@ -1,0 +1,256 @@
+{
+ "args": {
+  "cache_selected_only": false,
+  "defer": false,
+  "empty": false,
+  "enable_legacy_logger": false,
+  "exclude": [],
+  "exclude_resource_types": [],
+  "export_saved_queries": false,
+  "favor_state": false,
+  "include_saved_query": false,
+  "indirect_selection": "eager",
+  "introspect": true,
+  "invocation_command": "dbt build --select staging+ marts+",
+  "log_file_max_bytes": 10485760,
+  "log_format": "default",
+  "log_format_file": "debug",
+  "log_level": "info",
+  "log_level_file": "debug",
+  "log_path": "/opt/dbt/acme/logs",
+  "macro_debugging": false,
+  "partial_parse": true,
+  "partial_parse_file_diff": true,
+  "populate_cache": true,
+  "print": true,
+  "printer_width": 80,
+  "profiles_dir": "/opt/dbt/acme",
+  "project_dir": "/opt/dbt/acme",
+  "quiet": false,
+  "require_explicit_package_overrides_for_builtin_materializations": true,
+  "require_resource_names_without_spaces": false,
+  "resource_types": [],
+  "select": [
+   "staging+",
+   "marts+"
+  ],
+  "send_anonymous_usage_stats": true,
+  "show": false,
+  "show_resource_report": false,
+  "source_freshness_run_project_hooks": false,
+  "static_parser": true,
+  "strict_mode": false,
+  "use_colors": true,
+  "use_colors_file": true,
+  "vars": {},
+  "version_check": true,
+  "warn_error_options": {
+   "exclude": [],
+   "include": []
+  },
+  "which": "build",
+  "write_json": true
+ },
+ "elapsed_time": 0.638502836227417,
+ "metadata": {
+  "dbt_schema_version": "https://schemas.getdbt.com/dbt/run-results/v6.json",
+  "dbt_version": "1.8.10",
+  "env": {},
+  "generated_at": "2026-10-27T10:48:39.688354Z",
+  "invocation_id": "9f93619d-23c6-4158-aea0-c01c24859bab"
+ },
+ "results": [
+  {
+   "compiled": true,
+   "execution_time": 0.05797576904296875,
+   "failures": null,
+   "message": "CREATE VIEW",
+   "status": "success",
+   "unique_id": "model.acme.stg_events"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.06004190444946289,
+   "failures": null,
+   "message": "CREATE VIEW",
+   "status": "success",
+   "unique_id": "model.acme.stg_customers"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.029689550399780273,
+   "failures": null,
+   "message": "CREATE VIEW",
+   "status": "success",
+   "unique_id": "model.acme.stg_order_items"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.030007362365722656,
+   "failures": null,
+   "message": "CREATE VIEW",
+   "status": "success",
+   "unique_id": "model.acme.stg_orders"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.029811382293701172,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.not_null_stg_events_event_id.715b3f7012"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.012068986892700195,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.not_null_stg_customers_customer_id.e2cfb1f9aa"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.01713109016418457,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.unique_stg_customers_customer_id.c7614daada"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.010434865951538086,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.not_null_stg_order_items_order_item_id.26a7e2bc35"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.10663294792175293,
+   "failures": 50,
+   "message": "Got 50 results, configured to fail if != 0",
+   "status": "fail",
+   "unique_id": "test.acme.unique_stg_order_items_order_item_id.90e333a108"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.18945741653442383,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.unique_stg_events_event_id.66ebb17438"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.018573760986328125,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.not_null_stg_orders_order_id.81cfe2fe64"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.050054073333740234,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.accepted_values_stg_orders_status__pending__paid__shipped__delivered__cancelled__refunded.0ddc57fdf5"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.04105949401855469,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.unique_stg_orders_order_id.e3b841c71a"
+  },
+  {
+   "compiled": false,
+   "execution_time": 0,
+   "failures": null,
+   "message": null,
+   "status": "skipped",
+   "unique_id": "model.acme.fct_orders"
+  },
+  {
+   "compiled": false,
+   "execution_time": 0,
+   "failures": null,
+   "message": null,
+   "status": "skipped",
+   "unique_id": "test.acme.accepted_values_fct_orders_status__pending__paid__shipped__delivered__cancelled__refunded.0ee299da59"
+  },
+  {
+   "compiled": false,
+   "execution_time": 0,
+   "failures": null,
+   "message": null,
+   "status": "skipped",
+   "unique_id": "test.acme.not_null_fct_orders_order_id.4e687af8d0"
+  },
+  {
+   "compiled": false,
+   "execution_time": 0,
+   "failures": null,
+   "message": null,
+   "status": "skipped",
+   "unique_id": "test.acme.unique_fct_orders_order_id.523ddb6ce5"
+  },
+  {
+   "compiled": false,
+   "execution_time": 0,
+   "failures": null,
+   "message": null,
+   "status": "skipped",
+   "unique_id": "model.acme.mart_daily_revenue"
+  },
+  {
+   "compiled": false,
+   "execution_time": 0,
+   "failures": null,
+   "message": null,
+   "status": "skipped",
+   "unique_id": "test.acme.not_null_mart_daily_revenue_order_date.afa9807e23"
+  },
+  {
+   "compiled": false,
+   "execution_time": 0,
+   "failures": null,
+   "message": null,
+   "status": "skipped",
+   "unique_id": "test.acme.unique_mart_daily_revenue_order_date.d69c8c5e9b"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.1797482967376709,
+   "failures": null,
+   "message": "SELECT 20000",
+   "status": "success",
+   "unique_id": "model.acme.dim_customers"
+  },
+  {
+   "compiled": false,
+   "execution_time": 0,
+   "failures": null,
+   "message": null,
+   "status": "skipped",
+   "unique_id": "test.acme.relationships_fct_orders_customer_id__customer_id__ref_dim_customers_.d5636051d4"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.018480539321899414,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.not_null_dim_customers_customer_id.dd91cd1c8d"
+  },
+  {
+   "compiled": true,
+   "execution_time": 0.017696619033813477,
+   "failures": 0,
+   "message": null,
+   "status": "pass",
+   "unique_id": "test.acme.unique_dim_customers_customer_id.15c9f1e2fd"
+  }
+ ]
+}

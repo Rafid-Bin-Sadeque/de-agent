@@ -1,0 +1,14 @@
+version: 2
+sources:
+  - name: raw
+    schema: raw
+    loaded_at_field: updated_at
+    tables:
+      - name: customers
+      - name: products
+      - name: order_items
+      - name: events
+      - name: orders
+        freshness:
+          warn_after: {count: 2, period: hour}
+          error_after: {count: 6, period: hour}

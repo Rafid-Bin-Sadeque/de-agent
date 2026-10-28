@@ -1,0 +1,69 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e 'cli[dev]'
+      - run: ruff check cli scripts demo evals
+      - name: unit tests
+        if: matrix.python-version != '3.12'
+        run: >-
+          pytest -q cli/tests -m "not integration"
+          --cov=de_agent.collectors.redshift --cov=de_agent.collectors.aws --cov-report=term-missing
+          --cov-fail-under=85
+      # Optional custom deny-list (DEA_DENYLIST_FILE): a file of strings that must not appear in the repository;
+      # the test is skipped when the variable is unset.
+      # Integration tests start their own throwaway postgres:16 container (docker is preinstalled on
+      # ubuntu-latest). A `services:` container cannot be given `-c wal_level=logical`, which the
+      # replication-slot test needs, so the fixture runs `docker run` itself.
+      - name: unit + integration tests (postgres:16)
+        if: matrix.python-version == '3.12'
+        run: pytest -q cli/tests
+
+  hooks-py39:
+    # the hooks run under whatever python3 is on PATH (macOS ships 3.9); the CLI package stays >=3.10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: pip install pytest pyyaml
+      - run: PYTHONPATH=scripts/_vendor:cli/src pytest -q cli/tests/test_sqlclass.py cli/tests/test_extract.py
+      - run: PYTHONPATH=scripts/_vendor:cli/src pytest -q cli/tests/test_hooks.py cli/tests/test_session_hook.py
+
+  plugin-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm i -g @anthropic-ai/claude-code
+      - run: claude plugin validate . --strict
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build cli
+      - run: twine check cli/dist/*
+      - name: wheel smoke (installs the wheel, runs dea guard-test)
+        run: |
+          python -m venv /tmp/smoke && /tmp/smoke/bin/pip install cli/dist/*.whl
+          /tmp/smoke/bin/dea --help && /tmp/smoke/bin/dea guard-test

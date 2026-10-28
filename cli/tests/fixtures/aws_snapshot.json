@@ -1,0 +1,318 @@
+{
+ "collected_at": "2026-10-20T12:00:00Z",
+ "data": {
+  "athena_failures": [
+   {
+    "at": "2026-10-20T09:00:00Z",
+    "query_id": "q-0002",
+    "reason": "SYNTAX_ERROR: line 1:8: Column 'x' cannot be resolved",
+    "workgroup": "primary"
+   }
+  ],
+  "athena_top_queries": [
+   {
+    "query": "select count(*) from bronze.orders where dt = ?",
+    "query_id": "q-0001",
+    "scanned_bytes": 1073741824,
+    "state": "SUCCEEDED",
+    "workgroup": "primary"
+   }
+  ],
+  "athena_workgroups": [
+   {
+    "cancelled": 0,
+    "failed": 1,
+    "queries": 42,
+    "scanned_bytes": 3221225472,
+    "succeeded": 41,
+    "workgroup": "primary"
+   }
+  ],
+  "cloudwatch_alarms": [
+   {
+    "metric": "CDCLatencyTarget",
+    "name": "dms-cdc-latency-high",
+    "namespace": "AWS/DMS",
+    "reason": "Threshold Crossed: 1 datapoint [320.0] was greater than the threshold (300.0).",
+    "since": "2026-10-20T10:15:00Z"
+   }
+  ],
+  "dms_instances": [
+   {
+    "class": "dms.r5.large",
+    "cpu_avg": 22.5,
+    "cpu_max": 61.0,
+    "cpu_p95": 48.0,
+    "engine_version": "3.5.2",
+    "free_mem_min_bytes": 6442450944,
+    "free_mem_min_pct": 37.5,
+    "id": "acme-dms-1",
+    "memory_gb": 16.0,
+    "multi_az": false,
+    "status": "available",
+    "storage_gb": 100,
+    "swap_hours": 0,
+    "swap_max_bytes": 0
+   }
+  ],
+  "dms_table_issues": [],
+  "dms_tasks": [
+   {
+    "cdc_latency_source_max_s": 9.0,
+    "cdc_latency_source_p95_s": 4.0,
+    "cdc_latency_target_max_s": 15.0,
+    "cdc_latency_target_p95_s": 6.0,
+    "id": "acme-orders-cdc",
+    "instance": "acme-dms-1",
+    "last_failure_at": null,
+    "last_failure_message": null,
+    "rules": [
+     {
+      "action": "include",
+      "schema": "app",
+      "table": "orders",
+      "type": "selection"
+     },
+     {
+      "action": "include",
+      "schema": "app",
+      "table": "customers",
+      "type": "selection"
+     }
+    ],
+    "source": {
+     "database": "app",
+     "engine": "mysql"
+    },
+    "status": "running",
+    "stop_reason": null,
+    "tables_errored": 0,
+    "tables_suspended": 0,
+    "tables_total": 2,
+    "target": {
+     "bucket": "acme-lake",
+     "engine": "s3",
+     "folder": "bronze"
+    },
+    "type": "full-load-and-cdc"
+   },
+   {
+    "cdc_latency_source_max_s": 30.0,
+    "cdc_latency_source_p95_s": 12.0,
+    "cdc_latency_target_max_s": 60.0,
+    "cdc_latency_target_p95_s": 20.0,
+    "id": "acme-dwh-cdc",
+    "instance": "acme-dms-1",
+    "last_failure_at": null,
+    "last_failure_message": null,
+    "rules": [
+     {
+      "action": "include",
+      "schema": "app",
+      "table": "orders",
+      "type": "selection"
+     },
+     {
+      "action": "include",
+      "schema": "app",
+      "table": "customers",
+      "type": "selection"
+     },
+     {
+      "action": "include",
+      "schema": "app",
+      "table": "events",
+      "type": "selection"
+     },
+     {
+      "action": "include",
+      "schema": "ref",
+      "table": "%",
+      "type": "selection"
+     },
+     {
+      "action": "rename",
+      "schema": "app",
+      "target": "schema",
+      "type": "transformation",
+      "value": "raw"
+     },
+     {
+      "action": "rename",
+      "schema": "ref",
+      "target": "schema",
+      "type": "transformation",
+      "value": "raw_ref"
+     }
+    ],
+    "source": {
+     "database": "app",
+     "engine": "mysql"
+    },
+    "status": "running",
+    "stop_reason": null,
+    "tables_errored": 0,
+    "tables_suspended": 0,
+    "tables_total": 4,
+    "target": {
+     "database": "dwh",
+     "engine": "redshift"
+    },
+    "type": "cdc"
+   }
+  ],
+  "dms_top_tables": [
+   {
+    "cdc_changes": 120500,
+    "ddls": 0,
+    "deletes": 500,
+    "full_load_rows": 5000000,
+    "inserts": 90000,
+    "schema": "app",
+    "state": "Table completed",
+    "table": "orders",
+    "task": "acme-dwh-cdc",
+    "updates": 30000
+   },
+   {
+    "cdc_changes": 80100,
+    "ddls": 0,
+    "deletes": 0,
+    "full_load_rows": 9000000,
+    "inserts": 80000,
+    "schema": "app",
+    "state": "Table completed",
+    "table": "events",
+    "task": "acme-dwh-cdc",
+    "updates": 100
+   }
+  ],
+  "firehose_streams": [
+   {
+    "bucket": "acme-raw",
+    "buffer_interval_s": 300,
+    "buffer_mb": 5,
+    "delivery_success": 1.0,
+    "freshness_p95_s": 280.0,
+    "prefix": "firehose/clicks/!{timestamp:yyyy/MM/dd}/",
+    "status": "ACTIVE",
+    "stream": "acme-clicks",
+    "throttled_records": 0
+   }
+  ],
+  "glue_crawlers": [
+   {
+    "error": null,
+    "last_crawl_at": "2026-10-20T01:00:00Z",
+    "last_status": "SUCCEEDED",
+    "name": "bronze_crawler",
+    "state": "READY"
+   }
+  ],
+  "glue_job_runs": [
+   {
+    "completed": "2026-10-20T03:08:00Z",
+    "dpu_seconds": 1920,
+    "duration_s": 480,
+    "error": null,
+    "job": "load_orders",
+    "run_id": "jr_a1",
+    "started": "2026-10-20T03:00:00Z",
+    "state": "SUCCEEDED"
+   },
+   {
+    "completed": "2026-10-19T03:07:30Z",
+    "dpu_seconds": 1800,
+    "duration_s": 450,
+    "error": null,
+    "job": "load_orders",
+    "run_id": "jr_a0",
+    "started": "2026-10-19T03:00:00Z",
+    "state": "SUCCEEDED"
+   }
+  ],
+  "glue_tables": [
+   {
+    "database": "bronze",
+    "format": "parquet",
+    "last_partition_added": "2026-10-20T01:05:00Z",
+    "location": "s3://acme-lake/bronze/app/orders/",
+    "name": "orders",
+    "partition_keys": [
+     "dt"
+    ],
+    "partitions": 31,
+    "partitions_truncated": false
+   },
+   {
+    "database": "bronze",
+    "format": "parquet",
+    "location": "s3://acme-lake/bronze/app/customers/",
+    "name": "customers",
+    "partition_keys": []
+   },
+   {
+    "database": "bronze",
+    "location": "s3://acme-lake/other/",
+    "name": "unrelated",
+    "partition_keys": []
+   },
+   {
+    "database": "raw_clicks",
+    "format": "json",
+    "last_partition_added": "2026-10-20T00:10:00Z",
+    "location": "s3://acme-raw/firehose/clicks/",
+    "name": "clicks",
+    "partition_keys": [
+     "dt"
+    ],
+    "partitions": 12,
+    "partitions_truncated": false
+   }
+  ],
+  "meta": {
+   "collected_at": "2026-10-20T12:00:00Z",
+   "max_age_h": 26.0,
+   "max_metrics": 300,
+   "max_scan_gb": 100.0,
+   "metric_calls": 3,
+   "metrics_requested": 24,
+   "metrics_skipped": 0,
+   "services": [
+    "dms",
+    "glue",
+    "s3",
+    "athena",
+    "firehose",
+    "cloudwatch"
+   ],
+   "truncated": [],
+   "window_h": 24
+  },
+  "s3_prefixes": [
+   {
+    "bucket": "acme-lake",
+    "bytes": 5368709120,
+    "newest_at": "2026-10-20T11:30:00Z",
+    "newest_complete": true,
+    "object_count": 1840,
+    "prefix": "s3://acme-lake/bronze/",
+    "source": "list"
+   },
+   {
+    "bucket": "acme-raw",
+    "bytes": 21474836480,
+    "newest_at": "2026-10-20T11:55:00Z",
+    "newest_complete": true,
+    "object_count": 9100,
+    "prefix": "s3://acme-raw/firehose/",
+    "source": "list"
+   }
+  ]
+ },
+ "duration_s": 2.5,
+ "errors": [],
+ "schema_version": 1,
+ "source": "aws_main",
+ "type": "aws"
+}

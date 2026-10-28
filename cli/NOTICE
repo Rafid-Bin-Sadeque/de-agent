@@ -1,0 +1,6 @@
+de-agent
+Copyright the de-agent maintainers. Licensed under the Apache License 2.0.
+
+This product bundles third-party software:
+
+- sqlglot 30.25.0 (scripts/_vendor/sqlglot), MIT License. See scripts/_vendor/SQLGLOT_LICENSE.

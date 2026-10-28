@@ -1,0 +1,549 @@
+{
+ "cassette": {
+  "/api/v1/dags/dbt_build/dagRuns?limit=5&order_by=-start_date": {
+   "body": {
+    "dag_runs": [
+     {
+      "conf": {},
+      "dag_id": "dbt_build",
+      "dag_run_id": "dataset_triggered__2026-10-27T10:14:08.856893+00:00",
+      "data_interval_end": "2026-10-27T10:00:00+00:00",
+      "data_interval_start": "2026-10-27T09:00:00+00:00",
+      "end_date": "2026-10-27T10:14:28.877569+00:00",
+      "execution_date": "2026-10-27T10:14:08.856893+00:00",
+      "external_trigger": false,
+      "last_scheduling_decision": "2026-10-27T10:14:28.876411+00:00",
+      "logical_date": "2026-10-27T10:14:08.856893+00:00",
+      "note": null,
+      "run_type": "dataset_triggered",
+      "start_date": "2026-10-27T10:14:19.458402+00:00",
+      "state": "success"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/dags/export_daily_orders/dagRuns?limit=5&order_by=-start_date": {
+   "body": {
+    "dag_runs": [
+     {
+      "conf": {},
+      "dag_id": "export_daily_orders",
+      "dag_run_id": "scheduled__2026-10-26T02:00:00+00:00",
+      "data_interval_end": "2026-10-27T02:00:00+00:00",
+      "data_interval_start": "2026-10-26T02:00:00+00:00",
+      "end_date": "2026-10-27T10:14:02.683536+00:00",
+      "execution_date": "2026-10-26T02:00:00+00:00",
+      "external_trigger": false,
+      "last_scheduling_decision": "2026-10-27T10:14:02.681124+00:00",
+      "logical_date": "2026-10-26T02:00:00+00:00",
+      "note": null,
+      "run_type": "scheduled",
+      "start_date": "2026-10-27T10:13:50.865626+00:00",
+      "state": "success"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/dags/extract_shop/dagRuns?limit=5&order_by=-start_date": {
+   "body": {
+    "dag_runs": [
+     {
+      "conf": {},
+      "dag_id": "extract_shop",
+      "dag_run_id": "scheduled__2026-10-27T09:00:00+00:00",
+      "data_interval_end": "2026-10-27T10:00:00+00:00",
+      "data_interval_start": "2026-10-27T09:00:00+00:00",
+      "end_date": "2026-10-27T10:14:19.463854+00:00",
+      "execution_date": "2026-10-27T09:00:00+00:00",
+      "external_trigger": false,
+      "last_scheduling_decision": "2026-10-27T10:14:19.463100+00:00",
+      "logical_date": "2026-10-27T09:00:00+00:00",
+      "note": null,
+      "run_type": "scheduled",
+      "start_date": "2026-10-27T10:13:50.865828+00:00",
+      "state": "success"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/dags/warehouse_maintenance/dagRuns?limit=5&order_by=-start_date": {
+   "body": {
+    "dag_runs": [
+     {
+      "conf": {},
+      "dag_id": "warehouse_maintenance",
+      "dag_run_id": "scheduled__2026-10-26T03:00:00+00:00",
+      "data_interval_end": "2026-10-27T03:00:00+00:00",
+      "data_interval_start": "2026-10-26T03:00:00+00:00",
+      "end_date": "2026-10-27T10:14:02.688803+00:00",
+      "execution_date": "2026-10-26T03:00:00+00:00",
+      "external_trigger": false,
+      "last_scheduling_decision": "2026-10-27T10:14:02.688000+00:00",
+      "logical_date": "2026-10-26T03:00:00+00:00",
+      "note": null,
+      "run_type": "scheduled",
+      "start_date": "2026-10-27T10:13:50.865778+00:00",
+      "state": "success"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/dags/~/dagRuns/~/taskInstances?limit=100&offset=0&start_date_gte=2026-10-26T10%3A15%3A16Z&state=failed&state=up_for_retry": {
+   "body": {
+    "task_instances": [],
+    "total_entries": 0
+   },
+   "status": 200
+  },
+  "/api/v1/dags?limit=100&offset=0&order_by=dag_id": {
+   "body": {
+    "dags": [
+     {
+      "dag_display_name": "dbt_build",
+      "dag_id": "dbt_build",
+      "default_view": "grid",
+      "description": null,
+      "file_token": "Ii9vcHQvYWlyZmxvdy9kYWdzL2RidF9idWlsZC5weSI.9bPBo4A-grxp27b_QHLdMr2wvk0",
+      "fileloc": "/opt/airflow/dags/dbt_build.py",
+      "has_import_errors": false,
+      "has_task_concurrency_limits": false,
+      "is_active": true,
+      "is_paused": false,
+      "is_subdag": false,
+      "last_expired": null,
+      "last_parsed_time": "2026-10-27T10:15:08.997190+00:00",
+      "last_pickled": null,
+      "max_active_runs": 1,
+      "max_active_tasks": 16,
+      "max_consecutive_failed_dag_runs": 0,
+      "next_dagrun": null,
+      "next_dagrun_create_after": null,
+      "next_dagrun_data_interval_end": null,
+      "next_dagrun_data_interval_start": null,
+      "owners": [
+       "analytics-eng"
+      ],
+      "pickle_id": null,
+      "root_dag_id": null,
+      "schedule_interval": {
+       "__type": "CronExpression",
+       "value": "Dataset"
+      },
+      "scheduler_lock": null,
+      "tags": [
+       {
+        "name": "acme"
+       },
+       {
+        "name": "dbt"
+       }
+      ],
+      "timetable_description": "Triggered by datasets"
+     },
+     {
+      "dag_display_name": "export_daily_orders",
+      "dag_id": "export_daily_orders",
+      "default_view": "grid",
+      "description": null,
+      "file_token": "Ii9vcHQvYWlyZmxvdy9kYWdzL2V4cG9ydF9kYWlseV9vcmRlcnMucHki.dgyWmqvLYJuLZP4jAiEMkKSvBPo",
+      "fileloc": "/opt/airflow/dags/export_daily_orders.py",
+      "has_import_errors": false,
+      "has_task_concurrency_limits": false,
+      "is_active": true,
+      "is_paused": false,
+      "is_subdag": false,
+      "last_expired": null,
+      "last_parsed_time": "2026-10-27T10:15:08.635394+00:00",
+      "last_pickled": null,
+      "max_active_runs": 16,
+      "max_active_tasks": 16,
+      "max_consecutive_failed_dag_runs": 0,
+      "next_dagrun": "2026-10-27T02:00:00+00:00",
+      "next_dagrun_create_after": "2026-10-28T02:00:00+00:00",
+      "next_dagrun_data_interval_end": "2026-10-28T02:00:00+00:00",
+      "next_dagrun_data_interval_start": "2026-10-27T02:00:00+00:00",
+      "owners": [
+       "analytics-eng"
+      ],
+      "pickle_id": null,
+      "root_dag_id": null,
+      "schedule_interval": {
+       "__type": "CronExpression",
+       "value": "0 2 * * *"
+      },
+      "scheduler_lock": null,
+      "tags": [
+       {
+        "name": "acme"
+       },
+       {
+        "name": "export"
+       }
+      ],
+      "timetable_description": "At 02:00"
+     },
+     {
+      "dag_display_name": "extract_shop",
+      "dag_id": "extract_shop",
+      "default_view": "grid",
+      "description": null,
+      "file_token": "Ii9vcHQvYWlyZmxvdy9kYWdzL2V4dHJhY3Rfc2hvcC5weSI.xWfBRAZsCYn0QeK40kQVQ0NyySs",
+      "fileloc": "/opt/airflow/dags/extract_shop.py",
+      "has_import_errors": false,
+      "has_task_concurrency_limits": false,
+      "is_active": true,
+      "is_paused": false,
+      "is_subdag": false,
+      "last_expired": null,
+      "last_parsed_time": "2026-10-27T10:15:08.938495+00:00",
+      "last_pickled": null,
+      "max_active_runs": 1,
+      "max_active_tasks": 16,
+      "max_consecutive_failed_dag_runs": 0,
+      "next_dagrun": "2026-10-27T10:00:00+00:00",
+      "next_dagrun_create_after": "2026-10-27T11:00:00+00:00",
+      "next_dagrun_data_interval_end": "2026-10-27T11:00:00+00:00",
+      "next_dagrun_data_interval_start": "2026-10-27T10:00:00+00:00",
+      "owners": [
+       "data-eng"
+      ],
+      "pickle_id": null,
+      "root_dag_id": null,
+      "schedule_interval": {
+       "__type": "CronExpression",
+       "value": "@hourly"
+      },
+      "scheduler_lock": null,
+      "tags": [
+       {
+        "name": "extract"
+       },
+       {
+        "name": "acme"
+       }
+      ],
+      "timetable_description": "Every hour"
+     },
+     {
+      "dag_display_name": "warehouse_maintenance",
+      "dag_id": "warehouse_maintenance",
+      "default_view": "grid",
+      "description": null,
+      "file_token": "Ii9vcHQvYWlyZmxvdy9kYWdzL3dhcmVob3VzZV9tYWludGVuYW5jZS5weSI.hP7XMy921qp8xXaFAhx53mdUE_o",
+      "fileloc": "/opt/airflow/dags/warehouse_maintenance.py",
+      "has_import_errors": false,
+      "has_task_concurrency_limits": false,
+      "is_active": true,
+      "is_paused": false,
+      "is_subdag": false,
+      "last_expired": null,
+      "last_parsed_time": "2026-10-27T10:15:08.732476+00:00",
+      "last_pickled": null,
+      "max_active_runs": 16,
+      "max_active_tasks": 16,
+      "max_consecutive_failed_dag_runs": 0,
+      "next_dagrun": "2026-10-27T03:00:00+00:00",
+      "next_dagrun_create_after": "2026-10-28T03:00:00+00:00",
+      "next_dagrun_data_interval_end": "2026-10-28T03:00:00+00:00",
+      "next_dagrun_data_interval_start": "2026-10-27T03:00:00+00:00",
+      "owners": [
+       "data-eng"
+      ],
+      "pickle_id": null,
+      "root_dag_id": null,
+      "schedule_interval": {
+       "__type": "CronExpression",
+       "value": "0 3 * * *"
+      },
+      "scheduler_lock": null,
+      "tags": [
+       {
+        "name": "maintenance"
+       },
+       {
+        "name": "acme"
+       }
+      ],
+      "timetable_description": "At 03:00"
+     }
+    ],
+    "total_entries": 4
+   },
+   "status": 200
+  },
+  "/api/v1/datasets/events?dataset_id=1&limit=1&order_by=-timestamp": {
+   "body": {
+    "dataset_events": [
+     {
+      "created_dagruns": [],
+      "dataset_id": 1,
+      "dataset_uri": "warehouse://raw/customers",
+      "extra": {},
+      "id": 3,
+      "source_dag_id": "extract_shop",
+      "source_map_index": -1,
+      "source_run_id": "scheduled__2026-10-27T09:00:00+00:00",
+      "source_task_id": "extract_customers",
+      "timestamp": "2026-10-27T10:14:04.857220+00:00"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/datasets/events?dataset_id=2&limit=1&order_by=-timestamp": {
+   "body": {
+    "dataset_events": [
+     {
+      "created_dagruns": [],
+      "dataset_id": 2,
+      "dataset_uri": "warehouse://raw/products",
+      "extra": {},
+      "id": 1,
+      "source_dag_id": "extract_shop",
+      "source_map_index": -1,
+      "source_run_id": "scheduled__2026-10-27T09:00:00+00:00",
+      "source_task_id": "extract_products",
+      "timestamp": "2026-10-27T10:13:58.278876+00:00"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/datasets/events?dataset_id=3&limit=1&order_by=-timestamp": {
+   "body": {
+    "dataset_events": [
+     {
+      "created_dagruns": [
+       {
+        "dag_id": "dbt_build",
+        "dag_run_id": "dataset_triggered__2026-10-27T10:14:08.856893+00:00",
+        "data_interval_end": "2026-10-27T10:00:00+00:00",
+        "data_interval_start": "2026-10-27T09:00:00+00:00",
+        "end_date": "2026-10-27T10:14:28.877569+00:00",
+        "logical_date": "2026-10-27T10:14:08.856893+00:00",
+        "start_date": "2026-10-27T10:14:19.458402+00:00",
+        "state": "success"
+       }
+      ],
+      "dataset_id": 3,
+      "dataset_uri": "warehouse://raw/orders",
+      "extra": {},
+      "id": 4,
+      "source_dag_id": "extract_shop",
+      "source_map_index": -1,
+      "source_run_id": "scheduled__2026-10-27T09:00:00+00:00",
+      "source_task_id": "extract_orders",
+      "timestamp": "2026-10-27T10:14:08.855805+00:00"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/datasets/events?dataset_id=4&limit=1&order_by=-timestamp": {
+   "body": {
+    "dataset_events": [
+     {
+      "created_dagruns": [
+       {
+        "dag_id": "dbt_build",
+        "dag_run_id": "dataset_triggered__2026-10-27T10:14:08.856893+00:00",
+        "data_interval_end": "2026-10-27T10:00:00+00:00",
+        "data_interval_start": "2026-10-27T09:00:00+00:00",
+        "end_date": "2026-10-27T10:14:28.877569+00:00",
+        "logical_date": "2026-10-27T10:14:08.856893+00:00",
+        "start_date": "2026-10-27T10:14:19.458402+00:00",
+        "state": "success"
+       }
+      ],
+      "dataset_id": 4,
+      "dataset_uri": "warehouse://raw/order_items",
+      "extra": {},
+      "id": 2,
+      "source_dag_id": "extract_shop",
+      "source_map_index": -1,
+      "source_run_id": "scheduled__2026-10-27T09:00:00+00:00",
+      "source_task_id": "extract_order_items",
+      "timestamp": "2026-10-27T10:14:01.880145+00:00"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/datasets/events?dataset_id=5&limit=1&order_by=-timestamp": {
+   "body": {
+    "dataset_events": [
+     {
+      "created_dagruns": [],
+      "dataset_id": 5,
+      "dataset_uri": "warehouse://raw/events",
+      "extra": {},
+      "id": 5,
+      "source_dag_id": "extract_shop",
+      "source_map_index": -1,
+      "source_run_id": "scheduled__2026-10-27T09:00:00+00:00",
+      "source_task_id": "extract_events",
+      "timestamp": "2026-10-27T10:14:18.904988+00:00"
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/datasets?limit=100&offset=0": {
+   "body": {
+    "datasets": [
+     {
+      "aliases": [],
+      "consuming_dags": [],
+      "created_at": "2026-10-27T10:13:50.186238+00:00",
+      "extra": {},
+      "id": 1,
+      "producing_tasks": [
+       {
+        "created_at": "2026-10-27T10:13:50.187741+00:00",
+        "dag_id": "extract_shop",
+        "task_id": "extract_customers",
+        "updated_at": "2026-10-27T10:13:50.187743+00:00"
+       }
+      ],
+      "updated_at": "2026-10-27T10:15:08.944485+00:00",
+      "uri": "warehouse://raw/customers"
+     },
+     {
+      "aliases": [],
+      "consuming_dags": [],
+      "created_at": "2026-10-27T10:13:50.186243+00:00",
+      "extra": {},
+      "id": 2,
+      "producing_tasks": [
+       {
+        "created_at": "2026-10-27T10:13:50.188078+00:00",
+        "dag_id": "extract_shop",
+        "task_id": "extract_products",
+        "updated_at": "2026-10-27T10:13:50.188080+00:00"
+       }
+      ],
+      "updated_at": "2026-10-27T10:15:08.945109+00:00",
+      "uri": "warehouse://raw/products"
+     },
+     {
+      "aliases": [],
+      "consuming_dags": [
+       {
+        "created_at": "2026-10-27T10:13:50.271331+00:00",
+        "dag_id": "dbt_build",
+        "updated_at": "2026-10-27T10:13:50.271332+00:00"
+       }
+      ],
+      "created_at": "2026-10-27T10:13:50.186244+00:00",
+      "extra": {},
+      "id": 3,
+      "producing_tasks": [
+       {
+        "created_at": "2026-10-27T10:13:50.188260+00:00",
+        "dag_id": "extract_shop",
+        "task_id": "extract_orders",
+        "updated_at": "2026-10-27T10:13:50.188261+00:00"
+       }
+      ],
+      "updated_at": "2026-10-27T10:15:09.013023+00:00",
+      "uri": "warehouse://raw/orders"
+     },
+     {
+      "aliases": [],
+      "consuming_dags": [
+       {
+        "created_at": "2026-10-27T10:13:50.271334+00:00",
+        "dag_id": "dbt_build",
+        "updated_at": "2026-10-27T10:13:50.271334+00:00"
+       }
+      ],
+      "created_at": "2026-10-27T10:13:50.186245+00:00",
+      "extra": {},
+      "id": 4,
+      "producing_tasks": [
+       {
+        "created_at": "2026-10-27T10:13:50.188439+00:00",
+        "dag_id": "extract_shop",
+        "task_id": "extract_order_items",
+        "updated_at": "2026-10-27T10:13:50.188440+00:00"
+       }
+      ],
+      "updated_at": "2026-10-27T10:15:09.013386+00:00",
+      "uri": "warehouse://raw/order_items"
+     },
+     {
+      "aliases": [],
+      "consuming_dags": [],
+      "created_at": "2026-10-27T10:13:50.186246+00:00",
+      "extra": {},
+      "id": 5,
+      "producing_tasks": [
+       {
+        "created_at": "2026-10-27T10:13:50.188616+00:00",
+        "dag_id": "extract_shop",
+        "task_id": "extract_events",
+        "updated_at": "2026-10-27T10:13:50.188617+00:00"
+       }
+      ],
+      "updated_at": "2026-10-27T10:15:08.947210+00:00",
+      "uri": "warehouse://raw/events"
+     }
+    ],
+    "total_entries": 5
+   },
+   "status": 200
+  },
+  "/api/v1/importErrors?limit=100&offset=0": {
+   "body": {
+    "import_errors": [],
+    "total_entries": 0
+   },
+   "status": 200
+  },
+  "/api/v1/pools?limit=100": {
+   "body": {
+    "pools": [
+     {
+      "deferred_slots": 0,
+      "description": "Default pool",
+      "include_deferred": false,
+      "name": "default_pool",
+      "occupied_slots": 0,
+      "open_slots": 128,
+      "queued_slots": 0,
+      "running_slots": 0,
+      "scheduled_slots": 0,
+      "slots": 128
+     }
+    ],
+    "total_entries": 1
+   },
+   "status": 200
+  },
+  "/api/v1/version": {
+   "body": {
+    "git_version": ".release:b93c3db6b1641b0840bd15ac7d05bc58ff2cccbf",
+    "version": "2.10.5"
+   },
+   "status": 200
+  },
+  "/api/v2/version": {
+   "body": "\n\n<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <title>Airflow 404</title>\n    <link rel=\"icon\" type=\"image/png\" href=\"/static/pin_32.png\">\n  </head>\n  <body>\n    <div style=\"font-family: verdana; text-align: center; margin-top: 200px;\">\n      <img src=\"/static/pin_100.png\" width=\"50px\" alt=\"pin-logo\" />\n      <h1>Airflow 404</h1>\n      <p>Page cannot be found.</p>\n      <a href=\"/\">Return to the main page</a>\n      <p></p>\n    </div>\n  </body>\n</html>",
+   "status": 404
+  }
+ },
+ "now": "2026-10-27T10:15:16Z"
+}

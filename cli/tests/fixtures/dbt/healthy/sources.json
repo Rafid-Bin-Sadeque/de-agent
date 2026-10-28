@@ -1,0 +1,31 @@
+{
+ "elapsed_time": 0.1875598430633545,
+ "metadata": {
+  "dbt_schema_version": "https://schemas.getdbt.com/dbt/sources/v3.json",
+  "dbt_version": "1.8.10",
+  "env": {},
+  "generated_at": "2026-10-27T10:14:27.542547Z",
+  "invocation_id": "b7ba6efe-32df-443e-89c1-98576e79a77e"
+ },
+ "results": [
+  {
+   "criteria": {
+    "error_after": {
+     "count": 6,
+     "period": "hour"
+    },
+    "filter": null,
+    "warn_after": {
+     "count": 2,
+     "period": "hour"
+    }
+   },
+   "execution_time": 0.018114805221557617,
+   "max_loaded_at": "2026-10-27T10:14:04.360316+00:00",
+   "max_loaded_at_time_ago_in_s": 23.166139,
+   "snapshotted_at": "2026-10-27T10:14:27.526455+00:00",
+   "status": "pass",
+   "unique_id": "source.acme.raw.orders"
+  }
+ ]
+}

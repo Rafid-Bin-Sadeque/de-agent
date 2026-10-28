@@ -1,0 +1,46 @@
+name: evals
+# Manual dispatch only: the eval suite spends real API money and needs a Claude credential.
+# One run per case (smoke subset), not the 44-run suite; see evals/README.md for the full run.
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "comma-separated case ids (empty = all 12 cases, 1 run per condition)"
+        required: false
+        default: ""
+      cap:
+        description: "hard cost cap in USD"
+        required: false
+        default: "10"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: python -m venv cli/.venv && cli/.venv/bin/pip install -e cli pyyaml
+      - run: make demo-up
+      - name: eval smoke (1 run per case and condition)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEA_EVAL_SCRATCH: ${{ runner.temp }}/dea-evals
+        run: >-
+          cli/.venv/bin/python evals/run.py --out evals/results/ci-${{ github.run_id }}
+          --runs-override 1 --cap ${{ inputs.cap }} --only "${{ inputs.only }}"
+      - run: cli/.venv/bin/python evals/report.py evals/results/ci-${{ github.run_id }}
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: evals/results/ci-${{ github.run_id }}
+      - run: make demo-down
+        if: always()

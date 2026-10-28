@@ -1,0 +1,38 @@
+# Demo hub config for the Acme Shop stack. Secrets are env: references; `make demo-snapshot` loads demo/.env.
+# (Demo ports differ from the defaults so the stack can coexist with a local Postgres/Airflow.)
+version: 1
+hub: {name: "Acme Shop data platform (demo)", map_budget_tokens: 1500, snapshot_max_age_hours: 24, retention: 30}
+sources:
+  - name: warehouse
+    type: postgres
+    conn: {host: localhost, port: 5441, dbname: warehouse, user: readonly_agent, password: "env:DEMO_WH_PASSWORD", sslmode: disable}
+    options: {schemas: [raw, staging, analytics], top_tables: 25}
+  - name: source
+    type: postgres
+    conn: {host: localhost, port: 5440, dbname: shop, user: readonly_agent, password: "env:DEMO_WH_PASSWORD", sslmode: disable}
+    options: {schemas: [public], top_tables: 10}
+  - name: source_etl  # write-capable: used only by `dea apply` for approved plans; never snapshotted or queried
+    type: postgres
+    writable: true
+    conn: {host: localhost, port: 5440, dbname: shop, user: etl, password: "env:DEMO_ETL_PASSWORD", sslmode: disable}
+  - name: warehouse_etl  # write-capable: used only by `dea apply` for approved plans; never snapshotted or queried
+    type: postgres
+    writable: true
+    conn: {host: localhost, port: 5441, dbname: warehouse, user: etl, password: "env:DEMO_ETL_PASSWORD", sslmode: disable}
+  - name: airflow
+    type: airflow
+    options: {base_url: "http://localhost:8085", auth: basic, user: agent_ro, password: "env:DEMO_AF_PASSWORD", runs_per_dag: 5}
+  - name: dbt
+    type: dbt
+    options: {target_dir: dbt/acme/target}
+scans:
+  - name: pipelines
+    type: airflow
+    path: airflow
+    dag_folders: [dags]
+    dataset_tables: ["warehouse://{schema}/{table}"]
+  - name: analytics
+    type: dbt
+    path: dbt/acme
+    target_dir: target
+guard: {mode: strict}
