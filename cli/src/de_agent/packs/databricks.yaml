@@ -1,0 +1,56 @@
+pack: databricks
+version: 1
+kind: cli
+requires: {cli: databricks}
+validated: fixtures      # hand-built from the documented `databricks ... -o json` shapes (fictional values); not run against a live workspace
+description: Failed and long-running job runs, cluster state and SQL warehouse state through the Databricks CLI, for the job, cluster and warehouse ids you name (no account-wide listing).
+params:
+  job_ids: {type: list, default: [], description: "job ids to check for failed and long runs"}
+  cluster_ids: {type: list, default: [], description: "cluster ids to report state for"}
+  warehouse_ids: {type: list, default: [], description: "SQL warehouse ids to report state for"}
+  long_run_hours: {type: int, default: 6, description: "an active run older than this is reported"}
+sections:
+  - name: failed_runs_24h
+    run: [databricks, jobs, list-runs, --job-id, "{{item}}", --completed-only, --start-time-from, "{{since_24h_epoch_ms}}", --limit, "25", -o, json]
+    for_each: job_ids
+    select: "[?state.result_state=='FAILED' || state.result_state=='TIMEDOUT']"
+    fields: {run_id: run_id, job_id: job_id, run_name: run_name, result_state: state.result_state, message: state.state_message, start_time: start_time}
+    columns: [run_id, job_id, run_name, result_state, message, start_time]
+    key: run_id
+    signals:
+      - rows: "count > 0"
+        message: "{count} failed job run(s) in 24h"
+  - name: active_runs
+    run: [databricks, jobs, list-runs, --job-id, "{{item}}", --active-only, --limit, "25", -o, json]
+    for_each: job_ids
+    select: "@"
+    fields: {run_id: run_id, job_id: job_id, run_name: run_name, life_cycle_state: state.life_cycle_state, start_time: start_time}
+    columns: [run_id, job_id, run_name, life_cycle_state, start_time]
+    key: run_id
+    volatile: [life_cycle_state]
+    signals:
+      - when: "age_h(start_time) > p_long_run_hours"
+        message: "run {run_id} of job {job_id} has been active for more than {p_long_run_hours} h"
+  - name: clusters
+    run: [databricks, clusters, get, "{{item}}", -o, json]
+    for_each: cluster_ids
+    select: "@"
+    fields: {cluster_id: cluster_id, cluster_name: cluster_name, state: state, terminated_reason: termination_reason.code, state_message: state_message}
+    columns: [cluster_id, cluster_name, state, terminated_reason, state_message]
+    key: cluster_id
+    volatile: [state_message]
+    signals:
+      - when: "state == 'ERROR' or state == 'UNKNOWN' or terminated_reason in ['INSTANCE_UNREACHABLE', 'DRIVER_UNREACHABLE', 'CLOUD_PROVIDER_LAUNCH_FAILURE', 'SPARK_ERROR', 'INIT_SCRIPT_FAILURE', 'NODE_LOST']"
+        message: "cluster {cluster_name} is {state} ({terminated_reason})"
+        severity: error
+  - name: sql_warehouses
+    run: [databricks, warehouses, get, "{{item}}", -o, json]
+    for_each: warehouse_ids
+    select: "@"
+    fields: {id: id, name: name, state: state, cluster_size: cluster_size, auto_stop_mins: auto_stop_mins}
+    columns: [id, name, state, cluster_size, auto_stop_mins]
+    key: id
+    signals:
+      - when: "state == 'DELETED' or state == 'DELETING'"
+        message: "warehouse {name} is {state}"
+        severity: error

@@ -11,7 +11,9 @@ from typing import Any
 from de_agent.scanners import airflow as af
 from de_agent.scanners import catalog, headers
 from de_agent.scanners import dbt as dbt_scan
+from de_agent.scanners import python as py_scan
 from de_agent.scanners import sql as sql_scan
+from de_agent.scanners import terraform as tf_scan
 from de_agent.scanners.common import SCANNER_VERSION, last_commit, sha1, source_revision
 from de_agent.scanners.edges import build_edges
 
@@ -34,7 +36,8 @@ class ScanOutcome:
 
 
 def _sig(scan: Any) -> str:
-    return sha1(json.dumps([SCANNER_VERSION, scan.model_dump()], sort_keys=True).encode())[:16]
+    extra = tf_scan.parser_name() if scan.type == "terraform" else ""  # a different HCL parser re-parses everything
+    return sha1(json.dumps([SCANNER_VERSION, scan.model_dump(), extra], sort_keys=True).encode())[:16]
 
 
 def _load_json(p: Path) -> Any:
@@ -103,6 +106,22 @@ def scan_one(hub: Path, scan: Any, full: bool) -> tuple[dict[str, Any] | None, d
             scan, files, cache, full, lambda src, rel: sql_scan.scan_sql_text(src, rel, scan.dialect))
         rev = source_revision(root, hashes)
         result = sql_scan.assemble(scan, per_file, rev)
+        _dump(cache_p, {"sig": _sig(scan), "files": {r: {"sha": hashes[r], "result": per_file[r]} for r in per_file}})
+        state.update({"files": hashes, "parsed": parsed, "cached": cached})
+    elif scan.type == "python":
+        files = py_scan.list_files(scan, root)
+        per_file, hashes, parsed, cached = _per_file(
+            scan, files, cache, full, lambda src, rel: py_scan.scan_file(src, rel, scan.dialect))
+        rev = source_revision(root, hashes)
+        result = py_scan.assemble(scan, per_file, rev)
+        _dump(cache_p, {"sig": _sig(scan), "files": {r: {"sha": hashes[r], "result": per_file[r]} for r in per_file}})
+        state.update({"files": hashes, "parsed": parsed, "cached": cached})
+    elif scan.type == "terraform":
+        files = tf_scan.list_files(scan, root)
+        per_file, hashes, parsed, cached = _per_file(
+            scan, files, cache, full, lambda src, rel: tf_scan.scan_terraform_text(src, rel, scan.dialect))
+        rev = source_revision(root, hashes)
+        result = tf_scan.assemble(scan, per_file, rev)
         _dump(cache_p, {"sig": _sig(scan), "files": {r: {"sha": hashes[r], "result": per_file[r]} for r in per_file}})
         state.update({"files": hashes, "parsed": parsed, "cached": cached})
     else:
@@ -190,7 +209,7 @@ def run_scan(hub: Path, cfg: Any, only: list[str] | None = None, full: bool = Fa
                           "revision": st["revision"], "stats": res.get("stats", {})})
     ordered = [results[s.name] for s in cfg.scans if s.name in results]
     platform = platform_results(hub, cfg)
-    edges = build_edges(ordered, platform)
+    edges = build_edges(ordered, platform, cfg.edges.ignore_tables)
     out.edges = edges
     rev = ",".join([f"{r['scan']}@{r['revision']}" for r in ordered]
                    + [f"{p['source']}@{p['snapshot_id']}" for p in platform]) or "none"
@@ -203,6 +222,10 @@ def run_scan(hub: Path, cfg: Any, only: list[str] | None = None, full: bool = Fa
             symbols[r["scan"]] = r["symbols"]
         elif r["type"] == "dbt":
             pages.update(catalog.render_dbt(r, r["scan"]))
+        elif r["type"] == "python":
+            pages.update(catalog.render_python(r))
+        elif r["type"] == "terraform":
+            pages.update(catalog.render_terraform(r))
         else:
             pages.update(catalog.render_sql(r))
     if ordered or platform:
@@ -256,6 +279,8 @@ def _update_profiles(hub: Path, cfg: Any, ordered: list[dict[str, Any]], edges: 
                 links += [(f"airflow catalog: {r['scan']}", href), (f"symbols: {r['scan']}", f"../catalog/symbols/{r['scan']}.md")]
             elif r["type"] == "dbt":
                 links.append((f"dbt catalog: {r['scan']}", f"../catalog/dbt/{r['scan']}.md"))
+            elif r["type"] in ("python", "terraform"):
+                links.append((f"{r['type']} catalog: {r['scan']}", f"../catalog/{r['type']}/{r['scan']}.md"))
             else:
                 links.append((f"sql catalog: {r['scan']}", f"../catalog/sql/{r['scan']}.md"))
         links.append(("edges (cross-project lineage)", "../catalog/edges.md"))

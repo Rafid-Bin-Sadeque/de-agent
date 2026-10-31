@@ -79,6 +79,7 @@ Why this matters: the signature is cryptographic. If even one character of the p
 | Reading or printing passwords, keys and `.env` files | keeps secrets out of the chat |
 | Claude approving its own plan | a human must always sign off |
 | "Fixing" a failing test by deleting or weakening it | hiding a problem isn't fixing it |
+| Running a command that changes something through a cloud or data CLI (`aws s3 rm`, `terraform apply`, `dbt run`, `kubectl delete`, `airflow dags trigger`, ...) | the change goes through a plan you sign, like a database write |
 | Editing the safety rules themselves | so they can't be switched off quietly |
 
 When Claude hits one of these, it gets a short message explaining why, and usually tells you what to do instead. These rules are real code
@@ -122,6 +123,41 @@ cd demo && claude --plugin-dir ..
 There are six faults to try (`N=01` … `06`): a renamed column, a paused pipeline, a bloated table, a missing index, a failing data test,
 and a query stuck behind a lock. Each one's expected answer is in `demo/faults/NN_*/EXPECTED.md`, so you can check Claude's work.
 
+## Works with your stack
+
+`dea scan` reads your code (it never runs it) and builds the table-level map Claude uses for "what breaks if this changes". Three common shapes:
+
+**Snowflake and dbt.** Point one scan at the dbt project (after `dbt parse`) and one at the folder with your warehouse SQL:
+
+```yaml
+scans:
+  - {name: analytics, type: dbt, path: ../analytics}
+  - {name: warehouse, type: sql, path: ../warehouse_sql, dialect: snowflake}
+  - {name: infra, type: terraform, path: ../infra}      # optional: Snowflake tasks and tables, Pub/Sub, buckets
+```
+
+**Databricks.** Notebooks (`.ipynb`, and source notebooks that start with `# Databricks notebook source`) and pyspark jobs are read cell by cell,
+`%sql` cells included. `spark.table`, `saveAsTable`, `DeltaTable.forName` and `load("s3://...")` become edges:
+
+```yaml
+scans:
+  - {name: lakehouse, type: python, path: ../databricks_repo, dialect: spark}
+  - {name: infra, type: terraform, path: ../infra}       # jobs, buckets, Glue
+```
+
+**Plain Postgres and Python scripts.** Scripts that call `execute(...)`, `pandas.read_sql` or `to_sql` are listed function by function. If a script
+calls a helper in another file (`utils.run_proc("etl.sp_load_orders")`), the caller gets the helper's tables, up to two calls deep:
+
+```yaml
+scans:
+  - {name: jobs, type: python, path: ../scripts}
+  - {name: pipelines, type: airflow, path: ../airflow, dag_folders: [dags], util_packages: [utils]}
+edges:
+  ignore_tables: [etl.load_state]    # bookkeeping tables that would otherwise link everything to everything
+```
+
+What a scan cannot see is listed in [writing-a-scanner.md](writing-a-scanner.md) and in each catalog page's "unresolved" counts: it says so instead of guessing.
+
 ## Using it on your real platform
 
 1. `dea init` in a new folder. That folder is your hub.
@@ -133,6 +169,18 @@ Step-by-step with examples: [adoption.md](adoption.md). Every config option: [co
 
 **Good practice:** give the database user de-agent uses **read-only** permissions. The safety rules are strong, but a read-only user
 makes accidents impossible at the database level too.
+
+## Works with your stack
+
+You do not need a special integration for your tools. Three examples:
+
+- **Snowflake + dbt.** `pip install 'de-agent[snowflake]'`, then tell Claude "we also use Snowflake". It uses the `snowflake` pack (warehouses, failed queries, credit use, tasks)
+  and adds a source with a secret *reference* (never the password). The dbt project is a normal `dbt` scan. Snowflake's pack is tested on fictional fixtures, so expect to adjust it once.
+- **Databricks.** The `databricks` pack reads job runs, clusters and SQL warehouses through the `databricks` command you already have; `databricks-system` reads the system tables.
+  You name the job and cluster ids to watch, so nothing is listed account-wide.
+- **Plain Postgres + your own scripts.** `postgres-lite` shows long-running and blocked sessions and dead tuples with no extensions on the server; `dea scan` reads your code.
+
+Anything else with SQL, a command line or a web API: `dea pack new <name> --kind sql|cli|http`, or ask Claude to add it. How packs stay read-only: [packs.md](packs.md).
 
 ## When something is blocked and you don't know why
 
@@ -146,5 +194,7 @@ makes accidents impossible at the database level too.
 | `de-agent: removing or weakening a dbt test …` | Claude tried to delete or soften a failing test | fix the cause, or if the test itself is wrong, change it through a plan |
 | `de-agent: the guards protect themselves` | something tried to edit de-agent's own files | normal users: nothing to do. **Developing de-agent itself?** Restart Claude with `DEA_ALLOW_PLUGIN_EDITS=1` set in your shell ([CONTRIBUTING.md](../CONTRIBUTING.md)) |
 | `de-agent: SQL passed via a shell variable can't be checked` | the SQL was hidden in a variable like `$Q` | ask Claude to put the SQL directly in the command |
+| `` de-agent: `aws s3 rm` is a write; CLI writes run only as an approved plan shell step `` | Claude tried to change something with a cloud or data CLI | ask Claude to put it in a plan as a shell step; you sign it, the executor runs it |
+| `de-agent: … not a recognised read-only command; put it in a plan as a shell step` | the command is a verb the guard does not know to be read-only | same: a plan step. (To allow a safe one for good, you can list it under `guard: cli_allow:` in `de-agent.yaml`, in your own editor) |
 
 Still stuck? Run `dea doctor`. It checks your setup and tells you the first thing to fix.

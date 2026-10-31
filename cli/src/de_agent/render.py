@@ -803,6 +803,23 @@ BODIES: dict[str, Callable[[dict[str, Any]], list[str]]] = {
     "aws": _aws_body}
 
 
+def _pack_signals(data: dict[str, Any]) -> list[str]:
+    from de_agent.packs.view import signals
+
+    return signals(data)
+
+
+def _pack_body(data: dict[str, Any]) -> list[str]:
+    from de_agent.packs.view import body
+
+    return body(data)
+
+
+for _t in ("sql", "cli", "http"):  # generic pack collectors render from the result's own meta
+    SIGNALS[_t] = _pack_signals
+    BODIES[_t] = _pack_body
+
+
 def signals_for(result: dict[str, Any]) -> list[str]:
     fn = SIGNALS.get(result.get("type", ""))
     return fn(result.get("data") or {}) if fn else []

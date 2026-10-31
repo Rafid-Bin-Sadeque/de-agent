@@ -2,7 +2,7 @@
 
 A scanner reads a repo's files and extracts structure that code already encodes: which job reads or writes which table, what depends on
 what. `dea scan` turns the results into `catalog/` pages and table-level edges (`catalog/edges.json`), which `dea edges`, `dea impact` and
-`dea find` read. Built in: `airflow`, `dbt`, `sql`.
+`dea find` read. Built in: `airflow`, `dbt`, `sql`, `python` (scripts, notebooks, pyspark) and `terraform`.
 
 ## The contract
 
@@ -53,6 +53,28 @@ Wiring it in (the scanners are a closed set today, so this touches core files):
 For SQL inside code or files use `scanners/common.analyze_sql(sql, dialect)` (sqlglot): it returns `reads`, `writes`, `calls` and `unparsed`.
 When a statement cannot be parsed, fall back to `heuristic_sql` and mark the object `heuristic: true`; the catalog shows the mark.
 Never guess silently.
+
+## What the built-in code scanners cover (and do not)
+
+- **`python`**: SQL string literals given to `execute`, `executemany`, `read_sql`, `read_sql_query`, `text()`, `spark.sql`; pandas `read_sql_table` / `to_sql`;
+  pyspark `table`, `read.table`, `saveAsTable`, `insertInto`, `DeltaTable.forName` (plus `merge`/`update`/`delete` as writes), `option("dbtable", ..)`, `jdbc`,
+  and `read.format(..).load(path)`, `write.parquet(path)`, `.save(path)` as path nodes (`s3://bucket/prefix/`). One owner per function (`py:<file>:<func>`),
+  per file's module-level code (`py:<file>`) and per notebook (`nb:<file>`). Local variables, f-strings, `.format`, `"a" + b`, loops over a module-level list or
+  `dict.items()` and `zip(..)` are unrolled (an unrolled edge is marked); anything else is counted as `unresolved_sql`, never guessed.
+- **Notebooks**: every code cell of an `.ipynb` (magics other than `%sql` are dropped, cell numbers appear in the edge's file) and Databricks source notebooks
+  (`# MAGIC %sql` cells are parsed as SQL; line numbers are real file lines).
+- **Util attribution** (`airflow` and `python`): a call to a function in another scanned file (through `import`, `from x import y`, relative imports, `__init__` re-exports)
+  passes its literal arguments in, so `utils.run_proc("etl.sp_x")` becomes the `CALL etl.sp_x()` the helper executes. The caller gets the edge with
+  `via: util:<module.func>` (two calls deep: `via: util:a.f>b.g`, `hops: 2`); a third call is not followed. In an Airflow scan the callers are the DAGs: calls in task callables,
+  `python_callable=` with `op_args` / `op_kwargs`, helper functions in the DAG file and loops over config lists. An argument it cannot resolve counts as `unresolved_util_args`.
+- **`terraform`**: every `resource` is catalogued (type, name, file:line). DMS tasks (selection rules, S3 or database targets), Firehose, Glue tables, crawlers and jobs
+  (`s3://` default arguments; the direction comes from the argument name and is marked unclear when it has none), MWAA, BigQuery views, Pub/Sub subscriptions, Snowflake
+  tasks/views/pipes and Databricks SQL queries become edges where their attributes name the objects. Variable defaults, locals and resource names resolve; anything else is
+  listed under "Unresolved references". `python-hcl2` is used when installed, otherwise a built-in reader produces the same result.
+- **Limits**: no dataflow beyond string values (a table name read from a file, an environment variable or a function's return value is unresolved); methods on objects
+  (`self.db.run(..)` on an injected client) are not followed; a call through `getattr`, `importlib` or `*args` is not followed; loops over more than 500 items are
+  not unrolled; correlated arguments from two different `for x in LIST` loops are paired only for `dict.items()` / `zip` / tuple targets.
+- `edges.ignore_tables: [etl.load_state, ..]` in `de-agent.yaml` keeps those tables' own edges but stops `dea impact` from traversing through them.
 
 ## Rules
 

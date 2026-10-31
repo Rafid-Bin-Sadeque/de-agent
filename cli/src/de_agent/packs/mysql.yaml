@@ -1,0 +1,53 @@
+pack: mysql
+version: 1
+kind: sql
+dialect: mysql
+requires: {extra: mysql}
+validated: live          # run against a mysql:8.4 test container (see cli/tests/test_packs_live.py)
+description: Long-running statements, InnoDB lock waits, replica status and the largest tables of one MySQL (8.x) server. The monitoring user needs PROCESS, REPLICATION CLIENT, SELECT on performance_schema.* and SELECT plus EXECUTE on sys.*.
+params: {}
+sections:
+  - name: long_processlist
+    sql: |
+      select id, user, db, command, time as seconds, state, left(info, 200) as info
+      from information_schema.processlist
+      where command <> 'Sleep' and time > 300 and id <> connection_id()
+      order by time desc, id
+      limit 25
+    key: id
+    volatile: [seconds, state, info]
+    signals:
+      - rows: "count > 0"
+        message: "{count} statement(s) running for more than 5 min"
+  - name: innodb_lock_waits
+    sql: |
+      select wait_age_secs, locked_table, waiting_pid, blocking_pid,
+             left(waiting_query, 120) as waiting_query, left(blocking_query, 120) as blocking_query
+      from sys.innodb_lock_waits
+      order by wait_age_secs desc, waiting_pid
+      limit 25
+    key: [waiting_pid, blocking_pid]
+    volatile: [wait_age_secs, waiting_query, blocking_query]
+    signals:
+      - rows: "count > 0"
+        message: "{count} InnoDB lock wait(s)"
+  - name: replica_status
+    sql: show replica status
+    columns: [Source_Host, Replica_IO_Running, Replica_SQL_Running, Seconds_Behind_Source, Last_IO_Error, Last_SQL_Error]
+    key: Source_Host
+    volatile: [Seconds_Behind_Source]
+    signals:
+      - when: "Replica_IO_Running != 'Yes' or Replica_SQL_Running != 'Yes'"
+        message: "replication from {Source_Host} is not running (IO {Replica_IO_Running}, SQL {Replica_SQL_Running})"
+        severity: error
+      - when: "Seconds_Behind_Source > 300"
+        message: "replica is {Seconds_Behind_Source} s behind {Source_Host}"
+  - name: top_tables
+    sql: |
+      select table_schema as table_schema, table_name as table_name,
+             data_length + index_length as total_bytes, table_rows as approx_rows
+      from information_schema.tables
+      where table_schema not in ('mysql', 'sys', 'information_schema', 'performance_schema')
+      order by data_length + index_length desc, 1, 2
+      limit 20
+    key: [table_schema, table_name]

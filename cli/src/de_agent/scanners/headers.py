@@ -74,6 +74,12 @@ def build_block(project: str, results: list[dict[str, Any]], edges: dict[str, An
                      f"{st['unresolved_calls']} calls, {st['unresolved_sql']} dynamic SQL, {st['unresolved_datasets']} datasets")
         elif r["type"] == "dbt":
             L.append(f"- {st['models']} models, {st['sources']} sources, {st['exposures']} exposures")
+        elif r["type"] == "python":
+            L.append(f"- {st['files']} Python files ({st['notebooks']} notebooks), {st['owners']} functions/notebooks touching "
+                     f"data; unresolved: {st['unresolved_sql']} dynamic SQL, {st['unresolved_util_args']} util args")
+        elif r["type"] == "terraform":
+            L.append(f"- {st['resources']} Terraform resources ({st['data_nodes']} data-relevant), {st['edges']} edges; "
+                     f"unresolved refs: {st['unresolved_refs']}")
         else:
             L.append(f"- {st['objects']} SQL objects in {st['files']} files ({st['heuristic']} heuristic)")
     L.append(f"- top tables written: {_top(writes)}")

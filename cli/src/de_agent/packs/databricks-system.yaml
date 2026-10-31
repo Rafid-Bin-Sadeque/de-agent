@@ -1,0 +1,44 @@
+pack: databricks-system
+version: 1
+kind: sql
+dialect: databricks
+requires: {extra: databricks}
+validated: fixtures      # hand-built from the documented system-table shapes (fictional values); not run against a live workspace
+description: Job run failures, billing usage and failed SQL statements from the Databricks system tables, scoped to one workspace id. Needs SELECT on the system.lakeflow, system.billing and system.query schemas.
+params:
+  workspace_id: {type: str, required: true, description: "numeric workspace id to report on"}
+sections:
+  - name: job_failures_24h
+    sql: |
+      select job_id, run_id, result_state, termination_code, period_start_time
+      from system.lakeflow.job_run_timeline
+      where workspace_id = :workspace_id and result_state in ('FAILED', 'ERROR', 'TIMED_OUT')
+        and period_start_time > current_timestamp() - interval 24 hours
+      order by period_start_time desc
+      limit 50
+    key: [job_id, run_id]
+    signals:
+      - rows: "count > 0"
+        message: "{count} failed job run segment(s) in 24h"
+  - name: usage_24h
+    sql: |
+      select sku_name, usage_unit, sum(usage_quantity) as usage_quantity
+      from system.billing.usage
+      where workspace_id = :workspace_id and usage_date >= date_sub(current_date(), 1)
+      group by sku_name, usage_unit
+      order by usage_quantity desc, sku_name
+      limit 25
+    key: [sku_name, usage_unit]
+    volatile: [usage_quantity]
+  - name: failed_statements_24h
+    sql: |
+      select statement_id, executed_by, error_message, start_time
+      from system.query.history
+      where workspace_id = :workspace_id and execution_status = 'FAILED'
+        and start_time > current_timestamp() - interval 24 hours
+      order by start_time desc
+      limit 50
+    key: statement_id
+    signals:
+      - rows: "count > 0"
+        message: "{count} failed SQL statement(s) in 24h"

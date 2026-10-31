@@ -156,7 +156,7 @@ def scan(
     for s in out.scans:
         if s["status"] == "ok":
             st = s["stats"]
-            extra = ", ".join(f"{k}={v}" for k, v in st.items() if k.startswith(("dags", "models", "objects", "unresolved")))
+            extra = ", ".join(f"{k}={v}" for k, v in st.items() if k.startswith(("dags", "models", "objects", "owners", "resources", "unresolved")))
             typer.echo(f"{s['name']}: {s['type']} ok, {s['files']} files ({s['parsed']} parsed, {s['cached']} cached), "
                        f"{s['duration_s']}s, rev {s['revision']}; {extra}")
         elif s["status"] == "skipped":
@@ -237,6 +237,7 @@ def edges(table: str = typer.Argument(..., help="schema.table, e.g. analytics.fc
             extra += ", unrolled" if e.get("unrolled") else ""
             extra += ", heuristic" if e.get("heuristic") else ""
             extra += ", pattern" if e.get("pattern") else ""
+            extra += ", direction unclear" if e.get("unclear") else ""
             typer.echo(f"  {e['id']} [{e['project']}] via {e['via']}{extra}  {e.get('file', '')}")
 
 
@@ -340,6 +341,9 @@ def query(
         typer.echo(f"unknown source {source!r}; configured: {', '.join(s.name for s in cfg.sources if s.conn or s.data_api) or 'none'}",
                    err=True)
         raise typer.Exit(2) from None
+    if src.type in ("sql", "cli", "http"):
+        typer.echo(f"source {source!r} is a pack source: use `dea pack test {source}` (dea query is for postgres and redshift sources)", err=True)
+        raise typer.Exit(2)
     if src.conn is None and src.data_api is None:
         typer.echo(f"source {source!r} is not a SQL source (type {src.type})", err=True)
         raise typer.Exit(2)
@@ -558,6 +562,11 @@ def doctor() -> None:
             add(True, f"source {s.name}", f"{s.type} reachable via {s.exec} ({detail})")
         except Exception as ex:
             add(False, f"source {s.name}", str(ex).splitlines()[-1][:120] if str(ex) else type(ex).__name__)
+    if hub:
+        from de_agent.packs.cli import doctor_rows
+
+        for ok, name, detail in doctor_rows():
+            add(ok, name, detail)
     psql = shutil.which("psql")
     add(psql is not None, "psql", psql or "not on PATH (needed for ssh sources and the no-psycopg fallback)")
     add(fts5_available(), "fts5", "SQLite FTS5 available" if fts5_available() else "missing: dea find falls back to a slow scan")
@@ -625,6 +634,15 @@ def guard_test(
             typer.echo(f"FAIL {json.dumps(c['sql'])[:80]}: want {want} got {kinds}")
     typer.echo(f"{len(cases) - failed}/{len(cases)} passed")
     raise typer.Exit(1 if failed else 0)
+
+
+def _register_packs() -> None:
+    from de_agent.packs.cli import pack_app
+
+    app.add_typer(pack_app, name="pack")
+
+
+_register_packs()
 
 
 @app.callback()

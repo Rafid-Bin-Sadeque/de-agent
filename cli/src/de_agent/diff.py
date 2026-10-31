@@ -122,6 +122,10 @@ def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     """Structured diff of two results of the same source."""
     collector = get_collector(new["type"])
     volatile = set(getattr(collector, "volatile_fields", set()))
+    keys_for = getattr(collector, "list_keys_for", None)  # pack collectors: the pack decides keys and volatile fields
+    list_keys = keys_for(new) if keys_for else collector.list_keys
+    if keys_for:
+        volatile |= collector.volatile_for(new)
     windowed = set(getattr(collector, "windowed_sections", set()))  # sliding windows: rows age out, not "removed"
     ranking = set(getattr(collector, "ranking_sections", set()))  # top-N lists: entering/leaving is not news
     od, nd = old.get("data") or {}, new.get("data") or {}
@@ -147,7 +151,7 @@ def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
 
     estimated = set((od.get("meta") or {}).get("sizes_estimated") or []) | \
         set((nd.get("meta") or {}).get("sizes_estimated") or [])
-    for section, keys in collector.list_keys.items():
+    for section, keys in list_keys.items():
         if section not in od or section not in nd or section in skip:
             continue
         vol = volatile
@@ -170,7 +174,7 @@ def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
 
     for section in sorted(set(od) & set(nd)):
         o, n = od[section], nd[section]
-        if section in collector.list_keys or section == "meta" or not isinstance(o, dict) or not isinstance(n, dict):
+        if section in list_keys or section == "meta" or not isinstance(o, dict) or not isinstance(n, dict):
             continue
         if section in skip:
             continue

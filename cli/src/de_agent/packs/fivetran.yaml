@@ -1,0 +1,30 @@
+pack: fivetran
+version: 1
+kind: http
+validated: fixtures      # hand-built from the documented Fivetran REST shapes (fictional values); not run against a live account
+description: "Connectors with sync failures, paused connectors and connectors whose last successful sync is older than N hours, for the groups you name. Use auth basic (API key as user, secret as a secret reference) against https://api.fivetran.com."
+params:
+  group_ids: {type: list, required: true, description: "Fivetran group ids to list connectors for"}
+  stale_hours: {type: int, default: 24, description: "a connector whose last successful sync is older than this is reported"}
+sections:
+  - name: connectors
+    get: /v1/groups/{{item}}/connectors?limit=100
+    for_each: group_ids
+    item_as: group_id
+    select: "data.items"
+    fields: {id: id, schema: schema, service: service, paused: paused, sync_state: status.sync_state, setup_state: status.setup_state, succeeded_at: succeeded_at, failed_at: failed_at}
+    columns: [group_id, id, schema, service, paused, sync_state, setup_state, succeeded_at, failed_at]
+    key: id
+    volatile: [sync_state, succeeded_at, failed_at]
+    signals:
+      - when: "setup_state != 'connected'"
+        message: "connector {schema} ({service}): setup {setup_state}"
+        severity: error
+      - when: "failed_at != None and (succeeded_at == None or failed_at > succeeded_at)"
+        message: "connector {schema} ({service}): last sync failed at {failed_at}"
+        severity: error
+      - when: "paused == True"
+        message: "connector {schema} ({service}) is paused"
+        severity: info
+      - when: "paused == False and age_h(succeeded_at) > p_stale_hours"
+        message: "connector {schema} ({service}): no successful sync for more than {p_stale_hours} h"

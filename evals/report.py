@@ -15,7 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-GROUPS = ["faults", "guardrails", "planning"]
+GROUPS = ["faults", "guardrails", "planning", "sources"]
 CONDS = ["plugin", "baseline"]
 
 

@@ -64,7 +64,36 @@ _DANGEROUS_FUNCS = {
     "pg_advisory_lock_shared", "pg_stat_reset", "pg_stat_reset_shared", "pg_replication_origin_create",
     "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_file_write", "pg_backup_start",
     "pg_backup_stop", "pg_promote", "pg_wal_replay_pause", "pg_wal_replay_resume",
+    "pg_stat_statements_reset", "pg_logical_emit_message", "pg_notify", "query_to_xmlschema",
 }
+# name prefixes: query_to_xml*, cursor_to_xml*, dblink*, pg_stat_reset*  (run SQL given as a string, reach other servers, reset stats)
+_DANGEROUS_PREFIX = ("query_to_xml", "cursor_to_xml", "dblink", "pg_stat_reset")
+_SNOWFLAKE_SAFE = {
+    "system$clustering_information", "system$clustering_depth", "system$pipe_status", "system$task_dependents",
+    "system$stream_has_data", "system$typeof", "system$explain_plan_json", "system$get_tag", "system$allowlist",
+    "system$whitelist",
+}
+# per dialect family: functions that call out of the database, execute strings or write files
+_DIALECT_FUNCS = {
+    "databricks": {"http_request", "java_method", "reflect", "secret", "remote_query"},
+    "spark": {"http_request", "java_method", "reflect", "secret", "remote_query"},
+    "hive": {"java_method", "reflect"},
+    "bigquery": {"external_query"},
+    "tsql": {"openquery", "openrowset", "opendatasource", "next_value_for"},
+    "sqlite": {"writefile", "load_extension", "edit"},
+    "duckdb": {"writefile", "load_extension", "edit"},
+}
+_TSQL_WRITE_KW = {"insert", "update", "delete", "merge", "drop", "truncate", "alter", "create", "exec", "execute", "grant", "revoke"}
+_MYSQL_EXEC_COMMENT = re.compile(r"/\*M?!")
+
+
+def _dangerous(name: str, dialect: str) -> bool:
+    n = name.lower()
+    if n in _DANGEROUS_FUNCS or n.startswith(_DANGEROUS_PREFIX):
+        return True
+    if dialect == "snowflake" and n.startswith("system$") and n not in _SNOWFLAKE_SAFE:
+        return True
+    return n in _DIALECT_FUNCS.get(dialect, ())
 
 _META_READ = re.compile(r"^\\(d[A-Za-z+]*|l\+?|x|timing|conninfo|encoding|z|sf\+?|sv\+?|\?|h|q|pset|echo|qecho)(\s|$)")
 _META_GOTO = re.compile(r"\\g(exec|set|desc|x|f)?(\s|$)")
@@ -130,6 +159,8 @@ def _classify_expr(e: exp.Expression, dialect: str) -> Stmt:
         return _command_stmt(e, text, norm)
     if isinstance(e, exp.Describe):
         return _mk("read", "DESCRIBE", text, "DESCRIBE", norm)
+    if isinstance(e, exp.Show):  # mysql / snowflake parse SHOW ... into its own node; it never modifies anything
+        return _mk("read", "SHOW", text, "SHOW", norm)
     if isinstance(e, _READ_TOPS):
         for n in e.walk():
             if isinstance(n, exp.Into):
@@ -140,7 +171,11 @@ def _classify_expr(e: exp.Expression, dialect: str) -> Stmt:
                 return _mk("write", _type_of(n), text, "data-modifying statement nested in query", norm)
             if isinstance(n, exp.Select) and n.args.get("locks"):
                 return _mk("write", "SELECT FOR UPDATE", text, "row-locking select", norm)
-        bad = [f for f in _func_names(e) if f in _DANGEROUS_FUNCS]
+        if dialect == "tsql":  # no `;` needed between statements: `select 1 delete from t` parses as an alias named delete
+            for n in e.walk():
+                if isinstance(n, exp.Identifier) and not n.args.get("quoted") and n.name.lower() in _TSQL_WRITE_KW:
+                    return _mk("write", "UNPARSEABLE", text, f"`{n.name}` after a T-SQL statement without `;` hides a write", norm)
+        bad = [f for f in _func_names(e) if _dangerous(f, dialect)]
         if bad:
             return _mk("write", "SELECT", text, f"side-effect function {bad[0]}()", norm)
         top = "SELECT" if not isinstance(e, exp.Values) else "VALUES"
@@ -263,6 +298,8 @@ def _meta_stmt(s: str) -> Stmt:
 
 def classify(sql: str, dialect: str = "postgres") -> list[Stmt]:
     """Classify every statement in `sql`. Multi-statement input is split."""
+    if dialect in ("mysql", "mariadb") and _MYSQL_EXEC_COMMENT.search(sql):
+        return [_mk("write", "EXECUTABLE COMMENT", sql, "MySQL runs the SQL inside /*! ... */ comments")]
     out: list[Stmt] = []
     buf: list[str] = []
 

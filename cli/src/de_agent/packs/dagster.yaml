@@ -1,0 +1,59 @@
+pack: dagster
+version: 1
+kind: http
+validated: fixtures      # hand-built from the documented Dagster GraphQL shapes (fictional values); not run against a live instance
+description: "Failed runs (24 h) and stopped schedules and sensors of one Dagster deployment, through its read-only GraphQL API (queries only). Point base_url at the webserver; for Dagster+ use auth header with header_name Dagster-Cloud-Api-Token."
+params:
+  max_runs: {type: int, default: 50, description: "maximum failed runs to fetch"}
+sections:
+  - name: failed_runs_24h
+    graphql: |
+      query {
+        runsOrError(filter: {statuses: [FAILURE], createdAfter: {{since_24h_epoch}}}, limit: {{max_runs}}) {
+          __typename
+          ... on Runs { results { runId jobName status startTime endTime } }
+        }
+      }
+    select: "data.runsOrError.results"
+    fields: {run_id: runId, job_name: jobName, status: status, start_time: startTime, end_time: endTime}
+    columns: [run_id, job_name, status, start_time, end_time]
+    key: run_id
+    signals:
+      - rows: "count > 0"
+        message: "{count} failed run(s) in 24h"
+  - name: schedules
+    graphql: |
+      query {
+        workspaceOrError {
+          __typename
+          ... on Workspace {
+            locationEntries { name locationOrLoadError { ... on RepositoryLocation { repositories { name schedules { name scheduleState { status } } } } } }
+          }
+        }
+      }
+    select: "data.workspaceOrError.locationEntries[].locationOrLoadError.repositories[].schedules[]"
+    fields: {name: name, status: scheduleState.status}
+    columns: [name, status]
+    key: name
+    signals:
+      - when: "status == 'STOPPED'"
+        message: "schedule {name} is stopped"
+        severity: info
+  - name: sensors
+    graphql: |
+      query {
+        workspaceOrError {
+          __typename
+          ... on Workspace {
+            locationEntries { name locationOrLoadError { ... on RepositoryLocation { repositories { name sensors { name sensorState { status } } } } } }
+          }
+        }
+      }
+    select: "data.workspaceOrError.locationEntries[].locationOrLoadError.repositories[].sensors[]"
+    fields: {name: name, status: sensorState.status}
+    columns: [name, status]
+    key: name
+    signals:
+      - when: "status == 'STOPPED'"
+        message: "sensor {name} is stopped"
+        severity: info

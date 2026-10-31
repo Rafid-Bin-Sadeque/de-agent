@@ -1,5 +1,9 @@
 # Writing a collector
 
+**Try a pack first.** If the system has SQL, a command-line client or an HTTP API, a *pack* (a YAML file, no code) is usually enough: it gets the same page, signals,
+diffs and read-only guarantees. `dea pack new <name> --kind sql|cli|http` scaffolds one; see [packs.md](packs.md). Write a collector only when the system needs real code
+(multi-step API flows, pagination, joins across calls, binary formats).
+
 A collector reads one kind of live system and returns plain data. `dea snapshot` runs every configured source concurrently, renders the
 result to `platform/<source>.md`, and `dea diff` compares it with the previous snapshot. Adding a system (say Snowflake) is one module,
 one renderer, a registry line, and fixtures.

@@ -23,7 +23,8 @@ guard: {mode: strict}
 ```
 
 Per-collector `options` and the `aws`, `data_api` and `services` blocks are documented with each collector
-(for Redshift and AWS: [collectors.md](collectors.md)).
+(for Redshift and AWS: [collectors.md](collectors.md)). Sources of `type: sql`, `cli` or `http` run a *pack*
+(`pack: <name>`; its params go in `options:`): see [packs.md](packs.md).
 
 ## Top level
 
@@ -34,6 +35,7 @@ Per-collector `options` and the `aws`, `data_api` and `services` blocks are docu
 | `sources` | list of object (SourceConfig) |  | Live systems read by `dea snapshot` (read-only collectors). |
 | `scans` | list of object (ScanConfig) |  | Code scanned by `dea scan` into the catalog. |
 | `guard` | object (GuardConfig) |  | Write-guard behaviour. |
+| `edges` | object (EdgesConfig) |  | Lineage graph options. |
 
 ## `hub`
 
@@ -49,21 +51,29 @@ Per-collector `options` and the `aws`, `data_api` and `services` blocks are docu
 | key | type | default | description |
 |---|---|---|---|
 | `mode` | string | `"strict"` | `strict` denies a database write outside an approved plan; `ask` prompts instead of denying. |
+| `cli_allow` | list of string |  | Exact command prefixes the CLI write guard lets through, e.g. `dbt run --select staging` (word-for-word prefix of the command, after wrappers). A human edits this; agents cannot. |
 
 ## `sources[]`
 
 | key | type | default | description |
 |---|---|---|---|
 | `name` | string | required | Source name, `[a-z0-9_-]+`; used in file names and `dea query <source>`. |
-| `type` | string | required | Collector type: postgres, redshift, airflow, dbt or aws (see docs/collectors.md). |
+| `type` | string | required | Collector type: postgres, redshift, airflow, dbt or aws (see docs/collectors.md), or sql, cli or http to run a pack (see docs/packs.md). |
 | `exec` | string | `"local"` | `local`, or `ssh:<host-alias>` to run the collector on another host over ssh. |
 | `timeout_seconds` | integer (>= 1) or null | unset | Per-collector timeout. Unset: 600 for redshift, 120 otherwise. |
-| `conn` | object (ConnConfig) or null | unset | Database connection (postgres and redshift sources). |
+| `conn` | any or null | unset | Database connection: host/dbname/user for postgres and redshift sources; `{url, password}` for `type: sql` pack sources. |
+| `pack` | string or null | unset | `type: sql\|cli\|http` only: the pack to run (`dea pack list`). Its params go in `options:`. |
+| `base_url` | string or null | unset | `type: http` only: base URL of the API, as the machine that runs the request sees it. |
+| `auth` | string or null | unset | `type: http` only: `none`, `bearer`, `basic` or `header`. |
+| `user` | string or null | unset | `type: http` with `auth: basic`: the user name (not a secret). |
+| `token` | string or null | unset | `type: http` with `auth: bearer\|header`: secret reference. |
+| `password` | string or null | unset | `type: http` with `auth: basic`: secret reference. |
+| `header_name` | string or null | unset | `type: http` with `auth: header`: header that carries the token, e.g. `X-Api-Key`. |
 | `data_api` | object or null | unset | redshift only: Data API target `{cluster_id\|workgroup, database, db_user\|secret_arn}`. |
 | `aws` | object or null | unset | aws and redshift: `{profile, region}` or `{instance_role: true}`. |
 | `services` | object |  | aws only: which services to read (dms, glue, s3, athena, firehose, cloudwatch) and their options. |
 | `writable` | boolean | `false` | postgres only: the role may write. Used by `dea apply` for approved plans, never snapshotted. |
-| `options` | object |  | Collector-specific options (airflow, dbt, aws); see docs/collectors.md. |
+| `options` | object |  | Collector-specific options (airflow, dbt, aws; see docs/collectors.md), or the pack's params for sql, cli and http sources. |
 
 ## `sources[].conn`
 
@@ -76,17 +86,24 @@ Per-collector `options` and the `aws`, `data_api` and `services` blocks are docu
 | `password` | string | `"pgpass"` | Secret reference: `pgpass`, `none`, `env:NAME` or `file:/abs/path` (mode 0600). A literal is a load error. |
 | `sslmode` | string | `"prefer"` | libpq sslmode: disable, allow, prefer, require, verify-ca or verify-full. |
 
+## `sources[].conn` (sql pack sources)
+
+| key | type | default | description |
+|---|---|---|---|
+| `url` | string | required | SQLAlchemy URL without a password, e.g. `mysql+pymysql://reader@db.example.internal:3306/shop` (driver from the pack's extra). |
+| `password` | string | `"none"` | Secret reference for the URL's password: `none`, `env:NAME` or `file:/abs/path` (mode 0600). A literal is a load error; so is a password inside the URL. |
+
 ## `scans[]`
 
 | key | type | default | description |
 |---|---|---|---|
 | `name` | string | required | Scan name, `[a-z0-9_-]+`. |
-| `type` | string | required | Scanner type: airflow, dbt or sql. |
+| `type` | string | required | Scanner type: airflow, dbt, sql, python (scripts, notebooks, pyspark) or terraform. |
 | `path` | string | required | Directory to scan, relative to the hub. Parsed, never imported or run. |
 | `project` | string or null | unset | Project name the catalog entries belong to. Default: the scan name. |
 | `dag_folders` | list of string |  | airflow: DAG folders under `path`. |
 | `util_packages` | list of string |  | airflow: shared packages whose functions are resolved to their callers. |
 | `dataset_tables` | list of string |  | airflow: Dataset URI patterns, e.g. `warehouse://{schema}/{table}` (must contain `{table}`). |
 | `target_dir` | string | `"target"` | dbt: directory holding `manifest.json`, relative to `path`. |
-| `globs` | list of string |  | sql: file globs under `path`. |
-| `dialect` | string | `"postgres"` | airflow (SQL strings) and sql: sqlglot dialect used to parse SQL. |
+| `globs` | list of string |  | sql and python: file globs under `path` (python default: `**/*.py`, `**/*.ipynb`). |
+| `dialect` | string | `"postgres"` | airflow and python (SQL strings), sql and terraform: sqlglot dialect used to parse SQL. |

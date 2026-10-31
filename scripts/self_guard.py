@@ -5,13 +5,19 @@ For EVERY agent (main session included) this denies:
   1. Write/Edit/MultiEdit/NotebookEdit, and Bash writes (sed -i, >, >>, tee, cp, mv, rm, chmod, ln, install, dd of=,
      truncate, rsync, perl/ruby -i), that target hooks/, scripts/, .claude-plugin/, agents/ or skills/ under
      $CLAUDE_PLUGIN_ROOT. Maintainers developing the plugin itself start Claude with DEA_ALLOW_PLUGIN_EDITS=1.
-  2. Edits to a hub's de-agent.yaml that change the effective `guard:` mode or any `writable:` value (before/after is
-     computed like test_guard). Adding sources or scans stays allowed. Bash writes to de-agent.yaml are denied (use Edit).
+     Also protected: `cli/src` and `cli/pyproject.toml` (the classifiers the hooks import), `git -C $CLAUDE_PLUGIN_ROOT
+     checkout|pull|reset|...`, and `pip install --force-reinstall|-e ... de-agent` / `pip uninstall de-agent` (also `uv pip`).
+  2. Edits to a hub's de-agent.yaml that change the effective `guard:` mode, the `guard.cli_allow` list or any `writable:`
+     value (before/after is computed like test_guard). Adding sources or scans stays allowed. Bash writes to de-agent.yaml
+     are denied (use Edit), including interpreter and tool writes: a command that mentions de-agent.yaml (or a glob that
+     matches it) together with python/perl/node/ruby code that writes, awk -i inplace, ed, ex, patch, git apply|checkout|
+     restore, yq -i, sponge, vim -c, curl -o, wget -O or a sed `w` command. Known gap: `cp -r src/* .` where src holds one.
   3. Edits to .claude/settings*.json that change `hooks` or `disableAllHooks`. Bash writes to those files are denied.
 Stdlib only, Python 3.9 compatible. Fails closed on internal errors. Shell indirection / obfuscation is out of scope.
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -19,10 +25,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _guardlib import input_too_large  # noqa: E402
+from _guardlib import input_too_large, parse_cli_allow  # noqa: E402
 from test_guard import _REDIR, after_content, read_text, split_commands  # noqa: E402
 
 PROTECTED = ("hooks", "scripts", ".claude-plugin", "agents", "skills")
+PROTECTED_PATHS = (("cli", "src"), ("cli", "pyproject.toml"))
 EDIT_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 WRAPPERS = {"sudo", "env", "nohup", "time", "command", "exec", "nice", "stdbuf", "builtin"}
 ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -57,11 +64,21 @@ def in_plugin(real, root):
     rel = os.path.relpath(real, root)
     if rel.startswith(".."):
         return False
-    return rel.split(os.sep)[0] in PROTECTED
+    parts = rel.split(os.sep)
+    return parts[0] in PROTECTED or tuple(parts[:2]) in PROTECTED_PATHS
+
+
+def in_root(real, root):
+    return bool(root) and (real == root or real.startswith(root + os.sep))
 
 
 def is_yaml(real):
-    return os.path.basename(real) == "de-agent.yaml"
+    b = os.path.basename(real)
+    return b == "de-agent.yaml" or (_glob_tok(b) and fnmatch.fnmatchcase("de-agent.yaml", b))
+
+
+def _glob_tok(t):
+    return any(c in t for c in "*?[") and "{" not in t and len(re.sub(r"[*?\[\]]", "", t)) >= 3
 
 
 def is_settings(real):
@@ -93,6 +110,8 @@ def yaml_verdict(before, after):
         return "changes the `guard:` mode in de-agent.yaml"
     if _writable(before) != _writable(after):
         return "sets or alters a `writable:` source in de-agent.yaml"
+    if parse_cli_allow(before) != parse_cli_allow(after):
+        return "changes `guard.cli_allow` in de-agent.yaml (it loosens the CLI write guard)"
     return None
 
 
@@ -195,6 +214,110 @@ def check_simple(words, cwd, root, depth=0):
         why = _target_verdict(a, cwd, root)
         if why:
             return why
+    if root:
+        why = _git_verdict(name, args, cwd, root) or _pip_verdict(name, args, cwd, root)
+        if why:
+            return why
+    return None
+
+
+_GIT_SUBS = {"checkout", "apply", "pull", "reset", "restore", "stash", "merge", "rebase", "am", "cherry-pick", "clean", "switch",
+             "revert"}
+
+
+def _git_verdict(name, args, cwd, root):
+    """`git -C $CLAUDE_PLUGIN_ROOT pull` and friends rewrite the hooks and the classifiers they import."""
+    if name != "git":
+        return None
+    dirs, i = [], 0
+    while i < len(args) and args[i].startswith("-"):
+        a = args[i]
+        if a in ("-C", "--git-dir", "--work-tree") and i + 1 < len(args):
+            dirs.append(args[i + 1])
+            i += 2
+            continue
+        if a.startswith(("--git-dir=", "--work-tree=")):
+            dirs.append(a.split("=", 1)[1])
+        i += 2 if a in ("-c", "--namespace", "--exec-path") else 1
+    if i >= len(args) or args[i] not in _GIT_SUBS:
+        return None
+    if any(in_root(resolve(d, cwd), root) for d in (dirs or ["."])):
+        return f"{MSG}: no agent may run `git {args[i]}` in the plugin's own checkout{HATCH}"
+    return None
+
+
+def _pip_verdict(name, args, cwd, root):
+    """`pip install --force-reinstall|-e ... de-agent` and `pip uninstall de-agent` (also `uv pip`, `python -m pip`)."""
+    toks = None
+    if re.fullmatch(r"pip[0-9.]*", name):
+        toks = args
+    elif name == "uv" and "pip" in args:
+        toks = args[args.index("pip") + 1:]
+    elif re.fullmatch(r"python[0-9.]*", name) and "-m" in args and args[args.index("-m") + 1:args.index("-m") + 2] == ["pip"]:
+        toks = args[args.index("-m") + 2:]
+    if toks is None:
+        return None
+    sub = next((a for a in toks if not a.startswith("-")), "")
+    if sub not in ("install", "uninstall"):
+        return None
+    mention = any(re.search(r"de[-_]agent", a) for a in toks) or any(
+        in_root(resolve(a, cwd), root) for a in toks if not a.startswith("-") and (a == "." or "/" in a or a.startswith(".")))
+    force = any(a in ("--force-reinstall", "--reinstall", "-e", "--editable") or a.startswith("--editable=") for a in toks)
+    if mention and (sub == "uninstall" or force):
+        return f"{MSG}: no agent may reinstall or uninstall the de-agent package the hooks import{HATCH}"
+    return None
+
+
+_PY_NAME = re.compile(r"python[0-9.]*$")
+_PY_WRITE = re.compile(
+    r"""open\s*\(.*?,\s*(?:mode\s*=\s*)?['"][rbt]*[wax+]|\.open\s*\(\s*['"][rbt]*[wax+]|\.write\s*\(|write_text|write_bytes|"""
+    r"""\.dump\s*\(|shutil\.|os\.(?:rename|replace|remove|unlink|truncate|system|popen)|\.unlink\s*\(|\.touch\s*\(|"""
+    r"""\.rename\s*\(|subprocess|\bexec\s*\(|__import__""", re.S)
+_EDITORS = {"vi", "vim", "nvim", "view", "ex", "gvim", "vimdiff", "nano", "pico"}
+
+
+def mentions_yaml(text):
+    if "de-agent.yaml" in text:
+        return True
+    return any(_glob_tok(t) and fnmatch.fnmatchcase("de-agent.yaml", t) for t in re.findall(r"[\w.*?\[\]{}-]+", text))
+
+
+def _yaml_writer(command, cmds):
+    """The program among the commands that can write a mentioned de-agent.yaml (interpreters, patchers, editors, downloaders)."""
+    if not mentions_yaml(command):
+        return None
+    for words in cmds:
+        for k, w in enumerate(words):
+            name = os.path.basename(w)
+            rest = words[k + 1:]
+            if _PY_NAME.match(name) and _PY_WRITE.search(command):
+                return name
+            if name in ("perl", "ruby") and any(re.match(r"-[A-Za-z]*[eEi]", a) for a in rest):
+                return name
+            if name in ("node", "nodejs", "bun", "deno", "php") and any(a in ("-e", "--eval", "-p", "--print", "-r", "run") for a in rest):
+                return name
+            if name in ("awk", "gawk", "mawk", "nawk") and (
+                    ("inplace" in rest and any(a.startswith("-i") for a in rest))
+                    or any(mentions_yaml(a) and re.search(r">>?\s*[\"']|system\s*\(|\|\s*[\"']", a) for a in rest)):
+                return name
+            if name in ("ed", "patch", "sponge", "ex"):
+                return name
+            if name == "git" and any(a in ("apply", "checkout", "restore", "am", "checkout-index", "mv", "rm", "stash", "reset") for a in rest):
+                return name
+            if name == "yq" and any(a == "--inplace" or re.match(r"-[A-Za-z]*i", a) for a in rest if not a.startswith("--")):
+                return name
+            if name == "yq" and "--inplace" in rest:
+                return name
+            if name in _EDITORS and any(re.match(r"^(?:-[A-Za-z]*[cseS]|--cmd|\+.*)$", a) for a in rest):
+                return name
+            if name == "curl" and any(a in ("--output", "--remote-name", "--output-dir") or a.startswith("--output=") or
+                                      (re.match(r"-[A-Za-z]*[oO]", a) and not a.startswith("--")) for a in rest):
+                return name
+            if name == "wget" and any(a.startswith(("--output-document", "--output-file")) or
+                                      (re.match(r"-[A-Za-z]*[Oo]", a) and not a.startswith("--")) for a in rest):
+                return name
+            if name in ("sed", "gsed") and any(mentions_yaml(a) and re.search(r"(?:^|[^A-Za-z_\\])w[ \t]*\S*de-agent", a) for a in rest):
+                return name
     return None
 
 
@@ -216,6 +339,9 @@ def check_bash(command, cwd, root):
         cmds = split_commands(command)
     except ValueError:
         cmds = [command.split()]
+    w = _yaml_writer(command, cmds)
+    if w:
+        return f"{MSG}: `{w}` can write to de-agent.yaml (it holds the guard mode and writable sources); use the Edit tool"
     for words in cmds:
         why = check_simple(words, cwd, root)
         if why:

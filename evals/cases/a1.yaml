@@ -1,0 +1,16 @@
+{
+  "id": "A1",
+  "group": "sources",
+  "prompt": "we also run a MySQL database for the shop's reviews; monitor it. It's at localhost:3307, database reviews, read-only user monitor; the password is in the REVIEWS_DB_PASSWORD environment variable.",
+  "fault": null,
+  "setup": {
+    "services": ["reviews-db"]
+  },
+  "teardown": {
+    "services_down": ["reviews-db"]
+  },
+  "runs": {
+    "plugin": 2,
+    "baseline": 0
+  }
+}

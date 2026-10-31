@@ -1,0 +1,91 @@
+pack: snowflake
+version: 1
+kind: sql
+dialect: snowflake
+requires: {extra: snowflake}
+validated: fixtures      # hand-built from the documented SNOWFLAKE.ACCOUNT_USAGE shapes (fictional values); not run against a live account
+description: Warehouses, failed and queued queries, credit use by warehouse, task failures, pipe load failures and the largest tables, scoped to the warehouses and databases you name. Use a role limited to MONITOR / IMPORTED PRIVILEGES.
+params:
+  warehouses: {type: list, required: true, description: "warehouse names to report on"}
+  databases: {type: list, required: true, description: "database names to report on"}
+sections:
+  - name: warehouses
+    sql: show warehouses
+    columns: [name, state, size, auto_suspend, running, queued]
+    key: name
+    volatile: [running, queued]
+    signals:
+      - when: "auto_suspend == 0 or auto_suspend > 3600"
+        message: "warehouse {name} auto-suspend is {auto_suspend} s"
+  - name: failed_queries_24h
+    sql: |
+      select query_id, user_name, warehouse_name, error_code, error_message, start_time
+      from snowflake.account_usage.query_history
+      where execution_status = 'FAIL' and warehouse_name in :warehouses
+        and start_time > dateadd(hour, -24, current_timestamp())
+      order by start_time desc
+      limit 50
+    key: query_id
+    columns: [query_id, user_name, warehouse_name, error_code, error_message, start_time]
+    signals:
+      - rows: "count > 0"
+        message: "{count} failed queries in 24h"
+      - when: "error_message contains 'quota'"
+        message: "query {query_id}: quota error"
+        severity: error
+  - name: queued_queries_24h
+    sql: |
+      select warehouse_name, count(*) as queued_queries,
+             round(avg(queued_overload_time) / 1000, 1) as avg_queued_s
+      from snowflake.account_usage.query_history
+      where warehouse_name in :warehouses and queued_overload_time > 0
+        and start_time > dateadd(hour, -24, current_timestamp())
+      group by warehouse_name
+      order by queued_queries desc, warehouse_name
+    key: warehouse_name
+    volatile: [queued_queries, avg_queued_s]
+    signals:
+      - when: "avg_queued_s > 30"
+        message: "warehouse {warehouse_name}: queries wait {avg_queued_s} s on average for compute"
+  - name: credits_24h
+    sql: |
+      select warehouse_name, round(sum(credits_used), 2) as credits_used
+      from snowflake.account_usage.warehouse_metering_history
+      where warehouse_name in :warehouses and start_time > dateadd(hour, -24, current_timestamp())
+      group by warehouse_name
+      order by credits_used desc, warehouse_name
+    key: warehouse_name
+    volatile: [credits_used]
+  - name: task_failures_24h
+    sql: |
+      select name, database_name, schema_name, state, error_code, error_message, scheduled_time
+      from snowflake.account_usage.task_history
+      where state = 'FAILED' and database_name in :databases
+        and scheduled_time > dateadd(hour, -24, current_timestamp())
+      order by scheduled_time desc
+      limit 50
+    key: [database_name, schema_name, name, scheduled_time]
+    signals:
+      - rows: "count > 0"
+        message: "{count} task failure(s) in 24h"
+  - name: pipe_failures_24h
+    sql: |
+      select pipe_name, table_name, file_name, status, first_error_message, last_load_time
+      from snowflake.account_usage.copy_history
+      where pipe_name is not null and status in ('Load failed', 'Partially loaded')
+        and table_catalog_name in :databases
+        and last_load_time > dateadd(hour, -24, current_timestamp())
+      order by last_load_time desc
+      limit 50
+    key: [pipe_name, file_name]
+    signals:
+      - rows: "count > 0"
+        message: "{count} pipe load failure(s) in 24h"
+  - name: top_storage_tables
+    sql: |
+      select table_catalog, table_schema, table_name, active_bytes, time_travel_bytes, failsafe_bytes
+      from snowflake.account_usage.table_storage_metrics
+      where table_catalog in :databases and deleted = false
+      order by active_bytes desc, 1, 2, 3
+      limit 20
+    key: [table_catalog, table_schema, table_name]

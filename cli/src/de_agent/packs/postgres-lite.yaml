@@ -1,0 +1,65 @@
+pack: postgres-lite
+version: 1
+kind: sql
+dialect: postgres
+requires: {extra: pg}
+validated: live          # run against a PostgreSQL 16 test container (see cli/tests/test_packs_live.py)
+description: Long-running and blocked sessions, dead-tuple percentage and estimated table sizes for one PostgreSQL database (pg_stat_* and pg_class only, so no relation locks are taken and no extensions are needed).
+params: {}
+sections:
+  - name: long_running_sessions
+    sql: |
+      select pid, usename as "user", state, wait_event_type,
+             extract(epoch from now() - query_start)::bigint as duration_s,
+             left(query, 200) as query
+      from pg_stat_activity
+      where state = 'active' and backend_type = 'client backend' and pid <> pg_backend_pid()
+        and now() - query_start > interval '5 minutes'
+      order by 5 desc, 1
+      limit 25
+    key: pid
+    columns: [pid, user, state, wait_event_type, duration_s, query]
+    volatile: [state, wait_event_type, duration_s, query]
+    signals:
+      - rows: "count > 0"
+        message: "{count} session(s) running for more than 5 min"
+      - when: "duration_s > 3600"
+        message: "pid {pid} has been running for {duration_s} s"
+        severity: error
+  - name: blocked_sessions
+    sql: |
+      select b.pid as blocked_pid, k.pid as blocker_pid,
+             extract(epoch from now() - b.state_change)::bigint as wait_s,
+             left(b.query, 120) as blocked_query, left(k.query, 120) as blocker_query
+      from pg_stat_activity b
+      join pg_stat_activity k on k.pid = any (pg_blocking_pids(b.pid))
+      order by 3 desc, 1, 2
+      limit 25
+    key: [blocked_pid, blocker_pid]
+    volatile: [wait_s, blocked_query, blocker_query]
+    signals:
+      - rows: "count > 0"
+        message: "{count} blocked session(s)"
+  - name: dead_tuples
+    sql: |
+      select schemaname as "schema", relname as "table", n_live_tup, n_dead_tup,
+             round(100.0 * n_dead_tup / nullif(n_live_tup + n_dead_tup, 0), 1) as dead_pct,
+             last_autovacuum
+      from pg_stat_user_tables
+      where n_dead_tup > 1000
+      order by n_dead_tup desc, 1, 2
+      limit 20
+    key: [schema, table]
+    volatile: [last_autovacuum]
+    signals:
+      - when: "dead_pct >= 20 and n_dead_tup >= 100000"
+        message: "table {schema}.{table}: {dead_pct}% dead tuples ({n_dead_tup})"
+  - name: table_sizes
+    sql: |
+      select s.schemaname as "schema", s.relname as "table",
+             (c.relpages::bigint * 8192) as est_bytes, c.reltuples::bigint as est_rows
+      from pg_stat_user_tables s
+      join pg_class c on c.oid = s.relid
+      order by 3 desc, 1, 2
+      limit 20
+    key: [schema, table]

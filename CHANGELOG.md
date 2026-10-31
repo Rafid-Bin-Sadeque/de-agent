@@ -5,6 +5,31 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-28
+
+### Added
+- **Packs**: declarative sources. A pack is a YAML file (`sql`, `cli` or `http` kind) that the new generic collectors (`type: sql`, `type: cli`, `type: http`)
+  run read-only; render, diff, snapshots, `dea find` and the session hook work unchanged. Read-only is enforced in code for every kind (SQL classified in the pack's dialect and run in a
+  read-only transaction; CLI argv checked against a read-verb table with `shell=False`; HTTP GET and read-only GraphQL only). `when:` / `rows:` rules run in a whitelist expression interpreter.
+  See [docs/packs.md](docs/packs.md).
+- Eleven built-in packs: `postgres-lite` and `mysql` (validated live against PostgreSQL 16 and mysql:8.4 containers), `snowflake`, `bigquery`, `databricks`, `databricks-system`, `mssql`, `gcp`, `kubernetes`,
+  `dagster`, `fivetran` (validated on fixtures: hand-built from documented shapes with fictional values).
+- `dea pack list|show|new|check|test` (`dea query` points pack sources to `dea pack test`); `dea doctor` covers pack sources (driver or CLI present, credentials, `pack check`); hub-local `packs/<name>.yaml` overrides a built-in of the same name.
+- `add-source` skill: "we also use X" finds or drafts a pack, checks it, proposes the source block with secret references only, tests it.
+- Extras `mysql`, `snowflake`, `bigquery`, `databricks`, `mssql`, `terraform` and `all`; `jmespath` is now a core dependency; `pg` also installs SQLAlchemy.
+- `tools/release.sh` v2: the release commit goes on top of `origin/main` (or `--base <ref>`), so the public history is linear with one commit per release and pushes fast-forward; `--version`;
+  `--base none` keeps the orphan first-release path; the leak greps cover the new tree, the new commit's diff and the whole public history.
+- Scanners: `python` (scripts, `.ipynb` and Databricks source notebooks, pyspark and pandas table/path references, per-function edges) and `terraform`
+  (resources catalogued, DMS/Firehose/Glue/BigQuery/Snowflake/Pub/Sub/MWAA edges; optional `[terraform]` extra, regex fallback).
+- Util attribution: a DAG or job that calls a shared function inherits its SQL, table and proc edges (`via: util:<module.func>`, 2 hops, literal
+  arguments instantiated, loops over module-level lists and dicts unrolled). `edges.ignore_tables` keeps bookkeeping tables out of `dea impact`.
+- `cli_guard` hook: reads and writes classified for `aws`, `gcloud`, `gsutil`, `bq`, `databricks`, `kubectl`, `helm`, `terraform`/`tofu`, `pulumi`, `az`, `snow`, `dbt`,
+  `airflow`, `dagster`, `prefect`, `kafka-topics`/`kafka-configs`; wrappers and `docker`/`kubectl exec` followed; unknown verbs denied; `guard.cli_allow` (human-only, guarded by `self_guard`).
+
+### Changed
+- The SQL classifier treats `SHOW ...` in the MySQL and Snowflake dialects as a read (it is parsed into its own node there and was refused as a write).
+- `type:` of an unknown source now points to packs in its error message.
+
 ### Security
 - `sql_guard` reads `xargs` / `find -exec` / `env` wrapped clients, MCP tools of any name and any input field, and mysql, mariadb,
   snowsql, sqlcmd, clickhouse-client, sqlite3, duckdb, trino/presto, spark-sql and beeline; Python scripts that import a database
@@ -13,6 +38,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Size cap (200 KB input, 100 KB SQL) before parsing; new `self_guard` protects the plugin's hooks, the `guard:` mode, `writable:`
   sources and the hook settings; `test_guard` covers `dd of=`, `ex`/`ed`/`vi`, `perl -i`, `ruby -i`.
 - Diff steps are hashed over the exact patch bytes; `shell_destructive` looks inside `bash -c` and `env`.
+- `cli_guard` wrappers (red-team round): leading redirects, container images whose entrypoint is a guarded CLI, `python -m awscli|airflow|dbt|...`, `parallel`,
+  `taskset`, `runuser`, `su -c`, `strace`, `chroot`, `nsenter`, `unshare`, `busybox`, `systemd-run`, `script`, `tmux`, `screen`, `coproc`, `trap`, `at`/`crontab`, shell functions, runner
+  global options (`uv --directory . run`), `ssh -- cmd` / stdin / `-o ProxyCommand`, directly executed scripts, `$IFS` program names and write-then-run command lines; bq write flags, gcloud verb position,
+  boolean flags no longer swallow the verb, `gsutil`/`gcloud storage` to any non-local destination, `airflow info --file-io`.
+- `self_guard`: interpreter and tool writes to `de-agent.yaml` (including globs), the plugin's `cli/src` and `cli/pyproject.toml`, `git` and `pip` commands against the plugin's own checkout and package.
+- SQL: side-effecting function denylist per dialect (guard and packs), SQL on stdin by any path (`/dev/stdin`, `snow sql --stdin`), `mysql --init-command` and `--defaults-file`, MySQL executable
+  comments, T-SQL statements without `;`, `psql -o`/`-L`.
+- Packs: more banned flags (kubeconfig, host, account, endpoint, file, repo, ...), `--profile`/`--context` values restricted to plain names, secret-bearing operations refused for aws, gcloud, az,
+  terraform, airflow, databricks, kubectl, dbt and helm, and GraphQL comments and strings tokenised so one cannot hide a mutation from the other.
 
 ### Changed
 - `env:NAME` secret references resolve from the process environment, else from a `.env` file in the hub directory (read by `dea`

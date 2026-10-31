@@ -16,6 +16,7 @@ source-db (postgres:16.4, OLTP shop) --app-sim trickle--> extract_shop (Airflow 
 | `cd demo && DEA_HUB=$PWD ../cli/.venv/bin/dea scan` | static scan of `airflow/` and `dbt/acme` (needs `dbt/acme/target/manifest.json`, written by `dbt parse`/`build` inside the airflow container): `catalog/` (gitignored), generated header in `projects/*.md`; then `dea edges analytics.fct_orders`, `dea impact raw.orders` |
 | `make fault-inject N=01` / `make fault-revert N=01` | seeded faults 01-06 (see `faults/NN_*/EXPECTED.md`) |
 | `DEA_DEMO=1 pytest -m walkthrough -s cli/tests/test_walkthrough.py` | the scripted `claude -p` flow on fault 01 (triage, plan, human approve via pty, executor apply, re-snapshot); writes `faults/01_schema_drift/WALKTHROUGH.md` |
+| `docker compose --profile extra up -d --wait reviews-db` | optional MySQL 8.4 `reviews-db` (port 3307, read-only user `monitor`, 50 fictional reviews) for the add-source eval A1; never started by `make demo-up` |
 | `make demo-down` / `make demo-reset` | stop / stop and wipe volumes |
 | `DEA_DEMO=1 pytest -m demo -s cli/tests/test_demo_e2e.py` | the full e2e: every fault injected, detected through `dea diff`, reverted |
 

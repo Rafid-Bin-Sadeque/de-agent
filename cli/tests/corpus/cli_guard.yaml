@@ -1,0 +1,908 @@
+# CLI write guard corpus (v0.2 section 3). Every command runs through the real hook (scripts/cli_guard.py) under
+# DEA_HOOK_PYTHON (3.9 in CI). Sections: allow = no decision, deny = permissionDecision deny, ask = ask (mode: ask).
+# `mode` and `cli_allow` write a de-agent.yaml into the project dir first; `also_sql: true` also runs sql_guard (a deny from either counts).
+# All names are fictional.
+
+- section: aws
+  allow:
+    - aws s3 ls
+    - aws s3 ls s3://acme-lake/raw/
+    - aws --profile acme --region eu-west-1 s3 ls
+    - aws s3 cp s3://acme-lake/raw/x.csv ./x.csv
+    - aws s3 cp s3://acme-lake/raw/x.csv -
+    - aws s3 sync s3://acme-lake/raw/ ./raw --exclude "*.tmp"
+    - aws sts get-caller-identity
+    - aws ec2 describe-instances --region eu-west-1
+    - aws glue get-tables --database-name lake_raw
+    - aws dms describe-replication-tasks
+    - aws dms describe-table-statistics --replication-task-arn arn:aws:dms:x
+    - aws athena get-query-results --query-execution-id q1
+    - aws s3api head-object --bucket acme-lake --key raw/x.csv
+    - aws s3api list-objects-v2 --bucket acme-lake --prefix raw/
+    - aws s3api get-object --bucket acme-lake --key raw/x.csv out.csv
+    - aws lambda list-functions
+    - aws dynamodb batch-get-item --request-items file://items.json
+    - aws logs tail /aws/dms/task --since 1h
+    - aws cloudformation describe-stacks
+    - aws cloudtrail lookup-events --max-results 5
+    - aws configure list
+    - aws ec2 wait instance-running --instance-ids i-0abc
+    - aws s3 presign s3://acme-lake/raw/x.csv
+    - aws --version
+    - aws help
+    - aws s3 rm --help
+    - aws redshift-data describe-statement --id s1
+    - AWS_PROFILE=acme aws s3 ls
+    - aws s3 ls | head -5
+    - aws ec2 describe-instances 2>&1 | jq .Reservations
+    - aws dynamodb scan --table-name t
+  deny:
+    - aws s3 rm s3://acme-lake/raw/x.csv
+    - aws s3 rm s3://acme-lake/raw/ --recursive
+    - aws s3 cp ./x.csv s3://acme-lake/raw/x.csv
+    - aws s3 cp s3://acme-lake/a s3://acme-lake/b
+    - aws s3 cp - s3://acme-lake/raw/x.csv
+    - aws s3 mv s3://acme-lake/a s3://acme-lake/b
+    - aws s3 mv s3://acme-lake/a ./a
+    - aws s3 sync . s3://acme-lake/raw/
+    - aws s3 mb s3://new-bucket
+    - aws s3 rb s3://old-bucket --force
+    - aws ec2 start-instances --instance-ids i-0abc
+    - aws ec2 stop-instances --instance-ids i-0abc
+    - aws ec2 run-instances --image-id ami-1
+    - aws ec2 terminate-instances --instance-ids i-0abc
+    - aws rds reboot-db-instance --db-instance-identifier db1
+    - aws s3api create-bucket --bucket b
+    - aws s3api delete-object --bucket b --key k
+    - aws s3api put-object --bucket b --key k --body f
+    - aws lambda update-function-code --function-name f --zip-file fileb://f.zip
+    - aws rds modify-db-instance --db-instance-identifier db1 --apply-immediately
+    - aws lambda invoke --function-name f out.json
+    - aws glue start-job-run --job-name j
+    - aws dms start-replication-task --replication-task-arn a --start-replication-task-type resume-processing
+    - aws iam attach-role-policy --role-name r --policy-arn p
+    - aws sso login
+    - aws sts assume-role --role-arn r --role-session-name s
+    - aws ssm send-command --document-name d
+    - aws configure set region eu-west-1
+    - aws --profile acme --region eu-west-1 s3 rm s3://acme-lake/x
+    - aws s3 sync --delete . s3://acme-lake/x
+
+- section: aws-sql-carrying
+  also_sql: true
+  allow:
+    - aws redshift-data execute-statement --cluster-identifier c --database dev --sql "select 1"
+    - aws redshift-data batch-execute-statement --cluster-identifier c --database dev --sqls "select 1" "select 2"
+    - aws athena start-query-execution --query-string "select 1"
+    - aws athena get-query-execution --query-execution-id q1
+  deny:
+    - aws redshift-data execute-statement --cluster-identifier c --database dev --sql "drop table t"
+    - aws redshift-data batch-execute-statement --cluster-identifier c --database dev --sqls "select 1" "delete from t"
+    - aws athena start-query-execution --query-string "drop table t"
+    - aws redshift-data cancel-statement --id s1
+    - aws athena stop-query-execution --query-execution-id q1
+
+- section: gcloud
+  allow:
+    - gcloud compute instances list
+    - gcloud compute instances describe vm1 --zone europe-west1-b
+    - gcloud config list
+    - gcloud auth list
+    - gcloud logging read "severity>=ERROR" --limit 5
+    - gcloud storage ls gs://acme-lake
+    - gcloud storage cat gs://acme-lake/raw/x.csv
+    - gcloud storage cp gs://acme-lake/raw/x.csv ./x.csv
+    - gcloud composer environments list --locations europe-west1
+    - gcloud dataflow jobs list --region europe-west1
+    - gcloud pubsub subscriptions list
+    - gcloud projects get-iam-policy acme-prod
+    - gcloud run services list
+    - gcloud --project acme-prod sql instances describe db1
+    - gcloud version
+    - gcloud beta compute instances list
+    - gcloud functions logs read f1
+    - gcloud --help
+  deny:
+    - gcloud compute instances create vm2
+    - gcloud compute instances delete vm1 --quiet
+    - gcloud run deploy svc --image img
+    - gcloud functions deploy f1 --runtime python311
+    - gcloud dataproc jobs submit spark --cluster c
+    - gcloud projects set-iam-policy acme-prod policy.json
+    - gcloud storage cp ./x.csv gs://acme-lake/raw/x.csv
+    - gcloud storage rm gs://acme-lake/raw/x.csv
+    - gcloud storage mv gs://acme-lake/a gs://acme-lake/b
+    - gcloud composer environments run env1 --location europe-west1 dags trigger -- x
+    - gcloud sql instances patch db1 --tier db-f1-micro
+    - gcloud pubsub topics publish t --message hi
+    - gcloud compute ssh vm1
+    - gcloud auth login
+    - gcloud config set project acme-prod
+    - gcloud compute instances stop vm1
+
+- section: gsutil
+  allow:
+    - gsutil ls gs://acme-lake
+    - gsutil ls -l gs://acme-lake/raw/
+    - gsutil cat gs://acme-lake/raw/x.csv
+    - gsutil du -s gs://acme-lake
+    - gsutil stat gs://acme-lake/raw/x.csv
+    - gsutil hash gs://acme-lake/raw/x.csv
+    - gsutil cp gs://acme-lake/raw/x.csv ./x.csv
+    - gsutil acl get gs://acme-lake
+    - gsutil -m ls gs://acme-lake
+  deny:
+    - gsutil cp ./x.csv gs://acme-lake/raw/x.csv
+    - gsutil cp gs://acme-lake/a gs://acme-lake/b
+    - gsutil rm -r gs://acme-lake/raw/
+    - gsutil mv gs://acme-lake/a gs://acme-lake/b
+    - gsutil mb gs://new-bucket
+    - gsutil rb gs://old-bucket
+    - gsutil acl set private gs://acme-lake/raw/x.csv
+    - gsutil iam ch allUsers:objectViewer gs://acme-lake
+    - gsutil setmeta -h "Cache-Control:no-cache" gs://acme-lake/x
+    - gsutil rsync -r . gs://acme-lake/raw
+    - gsutil versioning set on gs://acme-lake
+
+- section: bq
+  allow:
+    - bq ls
+    - bq ls acme_ds
+    - bq show acme-prod:acme_ds.orders
+    - bq head -n 5 acme_ds.orders
+    - bq --project_id acme-prod ls
+    - bq version
+    - bq --format=json show acme_ds.orders
+    - bq wait job1
+  deny:
+    - bq mk acme_ds.new_table
+    - bq rm -f -t acme_ds.orders
+    - bq cp acme_ds.a acme_ds.b
+    - bq load acme_ds.t gs://acme-lake/x.csv
+    - bq insert acme_ds.t rows.json
+    - bq update --description x acme_ds.t
+    - bq extract acme_ds.t gs://acme-lake/out.csv
+    - bq cancel job1
+    - bq partition acme_ds.a acme_ds.b
+
+- section: bq-sql-carrying
+  also_sql: true
+  allow:
+    - bq query "select 1"
+    - bq query --use_legacy_sql=false "select count(*) from acme_ds.orders"
+  deny:
+    - bq query "drop table acme_ds.orders"
+    - bq query --use_legacy_sql=false "delete from acme_ds.orders where true"
+
+- section: databricks
+  allow:
+    - databricks jobs list
+    - databricks jobs get 1
+    - databricks jobs list-runs --job-id 1
+    - databricks jobs get-run 5
+    - databricks fs ls dbfs:/acme
+    - databricks fs cat dbfs:/acme/x.txt
+    - databricks workspace export /Shared/nb
+    - databricks clusters list
+    - databricks clusters get c1
+    - databricks warehouses list
+    - databricks -p acme jobs list
+    - databricks bundle validate
+    - databricks version
+  deny:
+    - databricks jobs run-now --job-id 1
+    - databricks jobs submit --json @j.json
+    - databricks jobs create --json @j.json
+    - databricks jobs delete 1
+    - databricks jobs reset --json @j.json
+    - databricks jobs cancel-run 5
+    - databricks fs rm dbfs:/acme/x.txt
+    - databricks fs cp ./x.txt dbfs:/acme/x.txt
+    - databricks fs mv dbfs:/a dbfs:/b
+    - databricks clusters start c1
+    - databricks clusters delete c1
+    - databricks clusters edit --json @c.json
+    - databricks bundle deploy
+    - databricks bundle run nightly_job
+    - databricks api post /api/2.0/jobs/run-now
+    - databricks auth token
+
+- section: databricks-sql-carrying
+  also_sql: true
+  allow:
+    - dbsqlcli -e "select 1"
+    - databricks sql -e "select 1"
+  deny:
+    - dbsqlcli -e "delete from acme.t"
+    - databricks sql -e "drop table acme.t"
+    - databricks sql
+    - dbsqlcli
+
+- section: kubectl
+  allow:
+    - kubectl get pods
+    - kubectl -n data get pods -o wide
+    - kubectl describe pod p1
+    - kubectl logs -f p1
+    - kubectl top nodes
+    - kubectl explain pod
+    - kubectl version
+    - kubectl config view
+    - kubectl config get-contexts
+    - kubectl config current-context
+    - kubectl auth can-i create pods
+    - kubectl api-resources
+    - kubectl rollout status deploy/web
+    - kubectl --context prod get ns
+    - kubectl get pods | grep Crash
+    - kubectl cp data/p1:/tmp/x ./x
+    - kubectl exec p1 -- aws s3 ls
+    - kubectl exec -it p1 -- psql -c "select 1"
+    - kubectl delete pod p1 --help
+  deny:
+    - kubectl apply -f dep.yaml
+    - kubectl create ns x
+    - kubectl delete pod p1
+    - kubectl edit deploy web
+    - kubectl patch deploy web -p '{}'
+    - kubectl replace -f dep.yaml
+    - kubectl scale deploy web --replicas 0
+    - kubectl rollout restart deploy/web
+    - kubectl rollout undo deploy/web
+    - kubectl cordon n1
+    - kubectl drain n1
+    - kubectl label pod p1 a=b
+    - kubectl annotate pod p1 a=b
+    - kubectl set image deploy/web c=img
+    - kubectl cp ./x data/p1:/tmp/x
+    - kubectl port-forward p1 8080:80
+    - kubectl exec p1 -- ls
+    - kubectl exec -it p1 -- bash
+    - kubectl exec p1 -- aws s3 rm s3://acme-lake/x
+    - kubectl exec p1 -- airflow dags trigger x
+    - kubectl config use-context prod
+    - kubectl exec p1
+
+- section: kubectl-sql-carrying
+  also_sql: true
+  allow:
+    - kubectl exec p1 -- psql -c "select 1"
+    - kubectl -n data exec -it p1 -c db -- psql -U acme -c "select 1"
+  deny:
+    - kubectl exec p1 -- psql -c "drop table t"
+    - kubectl exec p1 -- bash -c "psql -c 'delete from t'"
+
+- section: helm
+  allow:
+    - helm list
+    - helm -n data list
+    - helm status r1
+    - helm get values r1
+    - helm history r1
+    - helm show chart ./chart
+    - helm template r1 ./chart
+    - helm version
+  deny:
+    - helm install r1 ./chart
+    - helm upgrade --install r1 ./chart
+    - helm uninstall r1
+    - helm rollback r1 1
+    - helm repo add x https://example.invalid
+
+- section: terraform
+  allow:
+    - terraform plan
+    - terraform -chdir=infra plan
+    - terraform show
+    - terraform validate
+    - terraform fmt -check
+    - terraform output
+    - terraform state list
+    - terraform state show aws_s3_bucket.lake
+    - terraform providers
+    - terraform version
+    - terraform init
+    - terraform plan -out=tfplan
+    - terraform workspace list
+    - terraform workspace show
+    - terraform state pull
+    - tofu plan
+    - tofu show
+    - tofu validate
+  deny:
+    - terraform apply
+    - terraform apply -auto-approve
+    - terraform apply tfplan
+    - terraform destroy
+    - terraform import aws_s3_bucket.lake acme-lake
+    - terraform state rm aws_s3_bucket.lake
+    - terraform state mv a b
+    - terraform state push terraform.tfstate
+    - terraform taint aws_instance.x
+    - terraform untaint aws_instance.x
+    - terraform force-unlock abc
+    - terraform fmt
+    - terraform refresh
+    - terraform workspace new dev
+    - tofu apply
+    - tofu destroy
+    - terraform -chdir=infra apply
+
+- section: pulumi
+  allow:
+    - pulumi preview
+    - pulumi stack ls
+    - pulumi config get aws:region
+    - pulumi whoami
+    - pulumi stack output
+  deny:
+    - pulumi up
+    - pulumi up --yes
+    - pulumi destroy
+    - pulumi refresh --yes
+    - pulumi import aws:s3/bucket:Bucket b acme
+    - pulumi stack rm dev
+    - pulumi config set k v
+
+- section: az
+  allow:
+    - az vm list
+    - az group show -n rg1
+    - az account show
+    - az account list
+    - az resource list
+    - az storage blob list --container-name c
+    - az aks get-credentials -g rg1 -n k1
+    - az monitor metrics list --resource r
+    - az rest --method get --url https://example.invalid/x
+    - az version
+    - az vm show -g rg1 -n vm1
+  deny:
+    - az vm create -g rg1 -n vm2
+    - az group delete -n rg1
+    - az vm stop -g rg1 -n vm1
+    - az vm start -g rg1 -n vm1
+    - az vm restart -g rg1 -n vm1
+    - az webapp update -g rg1 -n a
+    - az functionapp config appsettings set -g rg1 -n f
+    - az vm run-command invoke -g rg1 -n vm1
+    - az storage blob upload -f x -c c -n n
+    - az rest --method post --url https://example.invalid/x
+    - az login
+
+- section: snow
+  allow:
+    - snow object list table
+    - snow object describe table acme.orders
+    - snow --help
+  deny:
+    - snow stage copy ./x @stg
+    - snow app deploy
+    - snow streamlit deploy
+    - snow connection add
+
+- section: snow-sql-carrying
+  also_sql: true
+  allow:
+    - snow sql -q "select 1"
+  deny:
+    - snow sql -q "drop table acme.t"
+    - snow sql
+
+- section: dbt
+  allow:
+    - dbt parse
+    - dbt compile
+    - dbt ls
+    - dbt list
+    - dbt docs generate
+    - dbt debug
+    - dbt deps
+    - dbt source freshness
+    - dbt test
+    - dbt test --select stg_orders
+    - dbt --profiles-dir ./p compile
+    - dbt show --select stg_orders
+    - dbt --version
+  deny:
+    - dbt run
+    - dbt run --select staging
+    - dbt build
+    - dbt seed
+    - dbt snapshot
+    - dbt run-operation grant_all
+    - dbt retry
+    - dbt clone --state ./prev
+    - dbt clean
+    - dbt init acme
+    - dbt --target prod run
+
+- section: airflow
+  allow:
+    - airflow dags list
+    - airflow dags show extract_shop
+    - airflow dags state extract_shop 2026-10-28
+    - airflow dags list-runs -d extract_shop
+    - airflow dags list-jobs
+    - airflow dags report
+    - airflow dags details extract_shop
+    - airflow tasks list extract_shop
+    - airflow tasks state extract_shop t 2026-10-28
+    - airflow tasks states-for-dag-run extract_shop run1
+    - airflow version
+    - airflow config get-value core dags_folder
+    - airflow config list
+    - airflow connections list
+    - airflow dags list --output json
+  deny:
+    - airflow dags trigger extract_shop
+    - airflow dags pause extract_shop
+    - airflow dags unpause extract_shop
+    - airflow dags delete extract_shop
+    - airflow dags backfill extract_shop -s 2026-10-01
+    - airflow dags reserialize
+    - airflow tasks clear extract_shop
+    - airflow tasks run extract_shop t 2026-10-28
+    - airflow tasks test extract_shop t 2026-10-28
+    - airflow db migrate
+    - airflow db reset
+    - airflow users create -u a
+    - airflow variables set k v
+    - airflow variables delete k
+    - airflow variables import f.json
+    - airflow pools set p 1 d
+    - airflow pools delete p
+    - airflow scheduler
+
+- section: dagster-prefect
+  allow:
+    - dagster job list
+    - dagster asset list
+    - dagster schedule list
+    - dagster instance info
+    - prefect flow-run ls
+    - prefect deployment ls
+    - prefect flow-run inspect abc
+    - prefect work-pool ls
+  deny:
+    - dagster job launch -j j1
+    - dagster job execute -j j1
+    - dagster asset materialize --select a
+    - dagster schedule start s1
+    - dagster run delete r1
+    - prefect deployment run flow/dep
+    - prefect flow-run cancel abc
+    - prefect flow-run delete abc
+    - prefect deployment delete flow/dep
+    - prefect work-pool create wp
+
+- section: kafka
+  allow:
+    - kafka-topics --bootstrap-server b:9092 --list
+    - kafka-topics --bootstrap-server b:9092 --describe --topic t
+    - kafka-topics.sh --bootstrap-server b:9092 --list
+    - kafka-configs --bootstrap-server b:9092 --describe --entity-type topics --entity-name t
+  deny:
+    - kafka-topics --bootstrap-server b:9092 --create --topic t
+    - kafka-topics --bootstrap-server b:9092 --delete --topic t
+    - kafka-topics --bootstrap-server b:9092 --alter --topic t --partitions 6
+    - kafka-configs --bootstrap-server b:9092 --alter --entity-type topics --entity-name t --add-config retention.ms=1
+    - kafka-topics.sh --bootstrap-server b:9092 --create --topic t
+    - kafka-topics --bootstrap-server b:9092
+
+- section: docker
+  allow:
+    - docker ps
+    - docker compose up -d
+    - docker compose ps
+    - docker exec web ls /app
+    - docker compose exec warehouse psql -U acme -c "select 1"
+    - docker compose exec -T airflow airflow dags list
+    - docker exec scheduler airflow dags list
+    - docker compose exec airflow dbt compile
+    - docker run --rm alpine echo hi
+    - docker logs web
+    - docker-compose exec airflow airflow version
+    - docker compose -f demo.yml exec airflow airflow tasks list extract_shop
+  deny:
+    - docker compose exec -T airflow airflow tasks clear x
+    - docker run --rm -e A=b img aws s3 rm s3://acme-lake/x
+    - docker run --rm img dbt run
+    - docker exec -it -u root x terraform apply
+    - docker-compose exec airflow airflow dags trigger x
+    - docker compose -f demo.yml exec airflow airflow dags unpause x
+    - docker compose run --rm dbt dbt run
+    - docker compose run --rm --entrypoint aws tool s3 rm s3://acme-lake/b
+    - docker exec scheduler airflow dags trigger x
+    - docker exec -it web bash -c "kubectl delete pod p1"
+    - docker compose exec airflow airflow dags backfill x -s 2026-10-01
+    - docker container exec web terraform destroy
+
+- section: wrappers-deny
+  deny:
+    - env AWS_PROFILE=acme aws s3 rm s3://acme-lake/k
+    - env -i aws s3 rm s3://acme-lake/k
+    - env -u HOME aws s3 rm s3://acme-lake/k
+    - sudo aws s3 rm s3://acme-lake/k
+    - sudo -u bob terraform apply
+    - sudo -E dbt run
+    - bash -c 'aws s3 rm s3://acme-lake/k'
+    - bash -lc "terraform destroy"
+    - sh -c "kubectl delete pod p1"
+    - zsh -c 'dbt run'
+    - timeout 30 aws s3 rm s3://acme-lake/k
+    - timeout -s KILL 5 terraform apply
+    - nice -n 5 dbt run
+    - nice dbt run
+    - nohup dbt build &
+    - uv run dbt run
+    - uv run --with dbt-core dbt run
+    - uv tool run dbt run
+    - uvx dbt run
+    - poetry run dbt build
+    - pipenv run terraform apply
+    - xargs -I{} aws s3 rm {}
+    - xargs -n1 -P4 aws s3 rm
+    - echo s3://acme-lake/x | xargs aws s3 rm
+    - echo x | xargs -0 terraform apply
+    - find . -name x -exec aws s3 rm {} \;
+    - find . -exec kubectl delete -f {} +
+    - find . -name '*.yaml' -execdir terraform apply {} \;
+    - time aws s3 rm s3://acme-lake/k
+    - command aws s3 rm s3://acme-lake/k
+    - exec dbt run
+    - ssh host aws s3 rm s3://acme-lake/k
+    - ssh -i key.pem host "terraform apply"
+    - ssh -p 2222 host airflow dags trigger x
+    - watch -n 5 aws ec2 stop-instances --instance-ids i-0abc
+    - echo $(aws s3 rm s3://acme-lake/k)
+    - echo `terraform apply`
+    - for f in a b; do aws s3 rm s3://acme-lake/$f; done
+    - aws s3 ls && aws s3 rm s3://acme-lake/x
+    - aws s3 ls; terraform apply
+    - aws s3 ls | xargs -I{} aws s3 rm {}
+    - eval "aws s3 rm s3://acme-lake/x"
+    - unbuffer terraform apply
+    - stdbuf -oL dbt run
+    - /usr/local/bin/aws s3 rm s3://acme-lake/k
+    - ./venv/bin/dbt run
+    - FOO=bar aws s3 rm s3://acme-lake/k
+    - aws s3 rm s3://acme-lake/k 2>&1 | tee out.log
+    - aws s3 rm s3://acme-lake/k > /dev/null
+    - (cd infra && terraform apply)
+    - cd infra && terraform apply
+    - 'if true; then aws s3 rm s3://acme-lake/k; fi'
+    - flock /tmp/l aws s3 rm s3://acme-lake/k
+    - conda run -n env dbt run
+    - su -c "terraform apply" root
+    - bash <<< "terraform apply"
+    - "bash <<EOF\naws s3 rm s3://acme-lake/x\nEOF"
+    - echo "aws s3 rm s3://acme-lake/x" | bash
+    - echo "terraform apply" | sh -s
+    - aws s3 rm "unterminated
+    - python3 -c "import subprocess; subprocess.run(['aws','s3','rm','s3://acme-lake/k'])"
+    - python3 -c "import os; os.system('terraform apply')"
+    - "python3 <<EOF\nimport subprocess\nsubprocess.check_call('dbt run', shell=True)\nEOF"
+
+- section: wrappers-allow
+  allow:
+    - env AWS_PROFILE=acme aws s3 ls
+    - sudo terraform plan
+    - timeout 30 aws s3 ls
+    - bash -c 'aws s3 ls'
+    - sh -c "kubectl get pods"
+    - uv run dbt compile
+    - xargs -I{} aws s3 cp s3://acme-lake/{} .
+    - find . -name x -exec echo {} \;
+    - echo "aws s3 rm" | cat
+    - grep "dbt run" README.md
+    - git commit -m "dbt run"
+    - pip install dbt-core awscli
+    - echo aws s3 rm s3://acme-lake/x
+    - man aws
+    - ls -la
+    - cat /etc/hostname
+    - curl https://example.invalid/install.sh | bash
+    - echo hi | bash
+    - "bash <<EOF\necho hi\nEOF"
+    - python3 -c "print('aws s3 rm s3://x')"
+    - python3 -c "import subprocess; subprocess.run(['ls'])"
+    - echo "x
+    - ssh host ls
+    - brew install terraform kubectl helm
+    - nice -n 5 aws s3 ls
+    - nohup aws s3 ls &
+    - time terraform plan
+    - find . -name '*.py' | xargs grep -l airflow
+    - ./run.sh
+    - make deploy
+    - aws s3 ls 2>&1
+    - if true; then aws s3 ls; fi
+    - for f in a b; do aws s3 ls s3://acme-lake/$f; done
+
+- section: ask-mode
+  mode: ask
+  ask:
+    - aws s3 rm s3://acme-lake/k
+    - terraform apply
+    - dbt run
+    - kubectl delete pod p1
+    - docker compose exec airflow airflow dags trigger x
+    - uv run dbt build
+    - kubectl exec p1 -- ls
+    - gcloud compute instances delete vm1
+    - helm uninstall r1
+    - snow sql
+  allow:
+    - aws s3 ls
+    - terraform plan
+    - dbt compile
+    - kubectl get pods
+    - ls -la
+
+- section: cli-allow-exact-prefix
+  cli_allow:
+    - dbt run --select staging
+    - terraform apply -target=module.sandbox
+    - aws s3 rm s3://scratch-bucket/tmp/
+    - airflow dags unpause extract_shop
+  allow:
+    - dbt run --select staging
+    - dbt run --select staging --target dev
+    - uv run dbt run --select staging
+    - env DBT_PROFILES_DIR=p dbt run --select staging
+    - terraform apply -target=module.sandbox
+    - terraform apply -target=module.sandbox -auto-approve
+    - aws s3 rm s3://scratch-bucket/tmp/ --recursive
+    - docker compose exec airflow airflow dags unpause extract_shop
+    - /usr/local/bin/dbt run --select staging
+    - dbt compile
+  deny:
+    - dbt run --select staging_x
+    - dbt run
+    - dbt run --select marts
+    - dbt build --select staging
+    - dbt run --target prod --select staging
+    - terraform apply
+    - terraform apply -target=module.prod
+    - terraform destroy -target=module.sandbox
+    - aws s3 rm s3://scratch-bucket/other/
+    - aws s3 rm s3://prod-bucket/tmp/
+    - aws s3 rb s3://scratch-bucket
+    - airflow dags unpause other_dag
+    - airflow dags trigger extract_shop
+    - dbt run --select staging; dbt run
+    - dbt run --select staging && terraform apply
+
+- section: cli-allow-ignored-entries
+  cli_allow:
+    - dbt
+    - "dbt run; rm -rf /"
+    - aws s3 rm s3://a/ && aws s3 rm s3://b/
+    - "terraform apply | tee x"
+  deny:
+    - dbt run
+    - dbt build
+    - aws s3 rm s3://a/
+    - aws s3 rm s3://b/
+    - terraform apply
+
+- section: cli-allow-block-list-yaml
+  raw_yaml: "version: 1\nguard:\n  mode: strict\n  cli_allow:\n    - dbt run --select staging   # nightly staging refresh\n    - 'terraform apply -target=module.sandbox'\n"
+  allow:
+    - dbt run --select staging
+    - terraform apply -target=module.sandbox
+  deny:
+    - dbt run
+    - terraform apply
+
+- section: cli-allow-flow-in-guard
+  raw_yaml: "version: 1\nguard: {mode: strict, cli_allow: [\"dbt run --select staging\", 'airflow dags unpause x']}\n"
+  allow:
+    - dbt run --select staging
+    - airflow dags unpause x
+  deny:
+    - dbt run --select staging2
+    - airflow dags unpause y
+
+- section: cli-allow-commented-out
+  raw_yaml: "version: 1\nguard:\n  mode: strict\n  # cli_allow: [\"dbt run\"]\n"
+  deny:
+    - dbt run
+
+- section: cli-allow-with-ask
+  mode: ask
+  cli_allow:
+    - dbt run --select staging
+  allow:
+    - dbt run --select staging
+  ask:
+    - dbt run
+    - dbt build
+
+# ---- v0.2 red-team round A (items 1-19). Fictional names only.
+- section: rt-a-deny
+  deny:
+    - ">/dev/null aws s3 rm s3://b"
+    - "2>x terraform apply"
+    - "</dev/null dbt run"
+    - "<<<x aws s3 rm s3://b"
+    - "docker run --rm amazon/aws-cli s3 rm s3://b"
+    - "docker run hashicorp/terraform apply"
+    - "docker run bitnami/kubectl delete pod p"
+    - "docker run ghcr.io/dbt-labs/dbt-core run"
+    - "docker run ghcr.io/dbt-labs/dbt-postgres:1.8 run"
+    - "docker run apache/airflow dags trigger x"
+    - "docker run pulumi/pulumi up"
+    - "docker create amazon/aws-cli s3 rm s3://b"
+    - "podman run --rm amazon/aws-cli s3 rm s3://b"
+    - "docker run --rm registry.example.invalid:5000/team/amazon/aws-cli@sha256:abc s3 rm s3://b"
+    - "docker run --rm amazon/aws-cli"
+    - "docker run hashicorp/terraform"
+    - "docker compose run aws-cli s3 rm s3://b"
+    - "python3 -m awscli s3 rm s3://b"
+    - "python -m airflow dags trigger x"
+    - "python3 -m dbt run"
+    - "python3 -m dbt.cli.main run"
+    - "python3 -m dagster job execute -f x.py"
+    - "python3 -m prefect deployment run x/y"
+    - "uv run python -m airflow dags trigger x"
+    - "ssh host 'python3 -m airflow dags trigger x'"
+    - "parallel 'aws s3 rm {}' ::: a b"
+    - "parallel --tag aws s3 rm {} ::: a b"
+    - "parallel --joblog j.log aws s3 rm {} ::: a b"
+    - "parallel --halt now,fail=1 aws s3 rm {} ::: a b"
+    - "taskset -c 0 aws s3 rm s3://b"
+    - "taskset --cpu-list 0,1 terraform apply"
+    - "uv --directory . run dbt run"
+    - "uv -q run dbt run"
+    - "uv --no-cache run dbt run"
+    - "poetry -C . run dbt run"
+    - "poetry -v run dbt run"
+    - "pipenv --python 3 run dbt run"
+    - "pdm -v run dbt run"
+    - "pdm run -s dbt run"
+    - "hatch -e x run dbt run"
+    - "uv run --refresh-package x dbt run"
+    - "uv run --cache-dir /tmp/c dbt run"
+    - "uv run --color never dbt run"
+    - "uv run --exclude-newer 2026-01-01 dbt run"
+    - "ssh host -- aws s3 rm s3://b"
+    - "ssh host -T aws s3 rm s3://b"
+    - "ssh -p 22 host -- aws s3 rm s3://b"
+    - "ssh host sh -s <<< \"aws s3 rm s3://b\""
+    - "ssh host bash <<EOF\naws s3 rm s3://b\nEOF"
+    - "ssh -o ProxyCommand='aws s3 rm s3://b' host"
+    - "ssh -oProxyCommand='aws s3 rm s3://b' host"
+    - "ssh -o 'LocalCommand aws s3 rm s3://b' host"
+    - "function f { aws s3 rm s3://b; }; f"
+    - "f() { aws s3 rm s3://b; }; f"
+    - "bq query --destination_table=p:d.t 'select 1'"
+    - "bq query --destination_table p:d.t 'select 1'"
+    - "bq query --append_table 'select 1'"
+    - "bq query --replace 'select 1'"
+    - "bq query --schedule='every 24 hours' 'select 1'"
+    - "bq query --target_dataset=d 'select 1'"
+    - "bq query --destination_schema=s.json 'select 1'"
+    - "bq query --destination_kms_key=k 'select 1'"
+    - "bq query --flagfile=f.txt 'select 1'"
+    - "bq --flagfile f.txt ls"
+    - "gcloud functions call get-user"
+    - "gcloud functions call list"
+    - "gcloud pubsub subscriptions pull --auto-ack show"
+    - "gcloud pubsub subscriptions pull get-sub"
+    - "kubectl --disable-compression run get --image=busybox"
+    - "gcloud --log-http compute instances delete vm1"
+    - "dbt --cache-selected-only run"
+    - "airflow -v dags trigger x"
+    - "gsutil cp gs://a/x s3://b/x"
+    - "gsutil rsync gs://a s3://b"
+    - "gcloud storage cp gs://a/x s3://b/x"
+    - "python3 -c \"import subprocess; subprocess.run(['env','aws','s3','rm','s3://b'])\""
+    - "python3 -c \"import subprocess; subprocess.run(['sudo','terraform','apply'])\""
+    - "env --split-string=\"aws s3 rm s3://b\""
+    - "runuser -u root aws s3 rm s3://b"
+    - "su --command='aws s3 rm s3://b' root"
+    - "su -lc 'aws s3 rm s3://b'"
+    - "nohup -- aws s3 rm s3://b"
+    - "setsid -f aws s3 rm s3://b"
+    - "unbuffer -p aws s3 rm s3://b"
+    - "xargs --eof aws s3 rm"
+    - "xargs --process-slot-var X aws s3 rm"
+    - "strace aws s3 rm s3://b"
+    - "strace -f -o /tmp/t aws s3 rm s3://b"
+    - "chroot / aws s3 rm s3://b"
+    - "nsenter -t 1 aws s3 rm s3://b"
+    - "unshare aws s3 rm s3://b"
+    - "busybox sh -c 'aws s3 rm s3://b'"
+    - "systemd-run aws s3 rm s3://b"
+    - "script -c \"aws s3 rm s3://b\""
+    - "tmux new -d \"aws s3 rm s3://b\""
+    - "screen -dmS x aws s3 rm s3://b"
+    - "coproc aws s3 rm s3://b"
+    - "trap 'aws s3 rm s3://b' EXIT"
+    - "at now <<<\"aws s3 rm s3://b\""
+    - "echo 'aws s3 rm s3://b' | crontab -"
+    - "echo 'aws s3 rm s3://b' | at now"
+    - "aws${IFS}s3${IFS}rm${IFS}s3://b"
+    - "aws$IFS s3 rm s3://b"
+    - "airflow info --file-io"
+    - "echo \"aws s3 rm s3://b\" > x.sh && bash x.sh"
+    - "cat > x.sh <<EOF\naws s3 rm s3://b\nEOF\nbash x.sh"
+    - "tee x.sh <<< 'aws s3 rm s3://b' ; sh x.sh"
+    - "cp s.sh y.sh && ./y.sh"
+
+- section: rt-a-allow
+  allow:
+    - ">/dev/null aws s3 ls"
+    - "docker run --rm amazon/aws-cli s3 ls"
+    - "docker run --rm amazon/aws-cli --version"
+    - "docker run --rm postgres:16 psql --version"
+    - "docker run alpine ls"
+    - "python3 -m awscli s3 ls"
+    - "python3 -m pytest -q"
+    - "python3 -m airflow dags list"
+    - "parallel echo {} ::: a b"
+    - "parallel --tag echo {} ::: a b"
+    - "taskset -c 0 aws s3 ls"
+    - "taskset 0x1 ls"
+    - "uv --directory . run dbt compile"
+    - "uv run --color never dbt compile"
+    - "poetry -C . run dbt compile"
+    - "pdm run -s dbt compile"
+    - "ssh host -- aws s3 ls"
+    - "ssh -p 22 host ls"
+    - "ssh host sh -s <<< \"echo hi\""
+    - "ssh -o ConnectTimeout=5 host ls"
+    - "function f { aws s3 ls; }; f"
+    - "bq query --nouse_legacy_sql 'select 1'"
+    - "gcloud functions list"
+    - "gcloud functions logs read f1"
+    - "gcloud pubsub subscriptions list"
+    - "gcloud compute instances describe list-me"
+    - "kubectl --disable-compression get pods"
+    - "gcloud --log-http compute instances list"
+    - "dbt --cache-selected-only compile"
+    - "airflow -v dags list"
+    - "gsutil cp gs://a/x ./x"
+    - "gcloud storage cp gs://a/x ./x"
+    - "python3 -c \"import subprocess; subprocess.run(['sudo','ls'])\""
+    - "env --split-string=\"aws s3 ls\""
+    - "runuser -u root ls"
+    - "su -lc 'aws s3 ls'"
+    - "nohup -- aws s3 ls"
+    - "setsid -f aws s3 ls"
+    - "xargs --eof aws s3 ls"
+    - "strace ls"
+    - "chroot / ls"
+    - "busybox sh -c 'aws s3 ls'"
+    - "systemd-run ls"
+    - "script -c \"aws s3 ls\""
+    - "tmux new -d \"aws s3 ls\""
+    - "screen -dmS x aws s3 ls"
+    - "trap 'echo bye' EXIT"
+    - "at now <<<\"echo hi\""
+    - "echo hi | crontab -l"
+    - "echo \"echo hi\" > notes.txt && cat notes.txt"
+    - "echo hi > x.sh && cat x.sh"
+    - "airflow info"
+
+- section: rt-a-files
+  files:
+    s.sh: "aws s3 rm s3://b\n"
+    bin/wrap: "#!/bin/sh\naws s3 rm s3://b\n"
+    path/to/x: "#!/usr/bin/env bash\nterraform apply\n"
+    ok.sh: "aws s3 ls\n"
+  deny:
+    - "bash -o pipefail s.sh"
+    - "bash -O extglob s.sh"
+    - "env bash -o pipefail s.sh"
+    - "bash --rcfile x s.sh"
+    - "./s.sh"
+    - "./bin/wrap"
+    - "path/to/x"
+    - "sh s.sh"
+  allow:
+    - "./ok.sh"
+    - "bash -o pipefail ok.sh"
+    - "./missing.sh"

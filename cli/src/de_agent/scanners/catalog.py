@@ -24,11 +24,16 @@ def _dag_line(d: dict[str, Any]) -> str:
     name = d["dag_id"] + (" [dynamic]" if d["dynamic"] else "")
     ins = [*d["inlets"], *[f"sensor:{s}" for s in d["sensors"]]]
     outs = [*d["outlets"], *[f"trigger:{t}" for t in d["triggers"]]]
-    return " · ".join([
-        name, d["schedule"] or "—", d["owner"] or "—", ",".join(d["tags"]) or "—", f"{d['file']}:{d['line']}",
-        f"in: {_list(ins)}", f"out: {_list(outs)}", f"writes: {_list(d['writes'] + [x['table'] for x in d['dataset_writes'] if x['table'] not in d['writes']])}",
-        f"reads: {_list(d['reads'] + [x['table'] for x in d['dataset_reads'] if x['table'] not in d['reads']])}",
-    ])
+    util = d.get("util_edges", [])
+    writes = d["writes"] + [x["table"] for x in d["dataset_writes"] if x["table"] not in d["writes"]]
+    reads = d["reads"] + [x["table"] for x in d["dataset_reads"] if x["table"] not in d["reads"]]
+    writes += sorted({t for u in util for t in u["writes"]} - set(writes))
+    reads += sorted({t for u in util for t in u["reads"]} - set(reads))
+    parts = [name, d["schedule"] or "—", d["owner"] or "—", ",".join(d["tags"]) or "—", f"{d['file']}:{d['line']}",
+             f"in: {_list(ins)}", f"out: {_list(outs)}", f"writes: {_list(writes)}", f"reads: {_list(reads)}"]
+    if util:
+        parts.append(f"via util: {_list(sorted({u['via'].removeprefix('util:') for u in util}))}")
+    return " · ".join(parts)
 
 
 def _airflow_section(dags: list[dict[str, Any]]) -> list[str]:
@@ -108,6 +113,65 @@ def render_sql(res: dict[str, Any]) -> dict[str, str]:
         lines.append(f"- {o['name']} · {o['kind']} ({o['file']}:{o['line']}) · reads: {_list(o['reads'])} · "
                      f"writes: {_list(o['writes'])}{mark}")
     return {f"catalog/sql/{scan}.md": _fm(res["revision"], scan=scan, type="sql") + "\n".join(lines) + "\n"}
+
+
+def render_python(res: dict[str, Any]) -> dict[str, str]:
+    scan, st = res["scan"], res["stats"]
+    lines = [f"# Python catalog: {scan}", "",
+             f"{st['files']} files ({st['notebooks']} notebooks), {st['functions']} functions; {st['owners']} touch tables or SQL. "
+             f"Unresolved: {st['unresolved_sql']} dynamic SQL, {st['unparsed_sql']} unparsed SQL, "
+             f"{st['unresolved_util_args']} util args; parse errors: {st['parse_errors']}.", ""]
+    cur = ""
+    for o in res["owners"]:
+        if o["file"] != cur:
+            cur = o["file"]
+            lines += ["", f"## {cur}", ""] if lines[-1] != "" else [f"## {cur}", ""]
+        rd = sorted({t for r in o["direct"] for t in r["reads"]})
+        wr = sorted({t for r in o["direct"] for t in r["writes"]})
+        cl = sorted({t for r in o["direct"] for t in r["calls"]})
+        parts = [o["id"], f"{o['file']}:{o['line']}", f"reads: {_list(rd)}", f"writes: {_list(wr)}"]
+        if cl:
+            parts.append(f"calls: {_list(cl)}")
+        if any(r.get("heuristic") for r in o["direct"]):
+            parts.append("[heuristic]")
+        util = sorted({u["via"].removeprefix("util:") for u in o["util"]})
+        if util:
+            parts.append(f"via util: {_list(util)}")
+        lines.append("- " + " · ".join(parts))
+    return {f"catalog/python/{scan}.md": _fm(res["revision"], scan=scan, type="python") + "\n".join(lines) + "\n"}
+
+
+def render_terraform(res: dict[str, Any]) -> dict[str, str]:
+    scan, st = res["scan"], res["stats"]
+    lines = [f"# Terraform catalog: {scan}", "",
+             f"{st['resources']} resources in {st['files']} files ({st['data_nodes']} data-relevant, {st['edges']} edges); "
+             f"unresolved refs: {st['unresolved_refs']}; parse errors: {st['parse_errors']}.", ""]
+    by_type: dict[str, list[dict[str, Any]]] = {}
+    for n in res["nodes"]:
+        by_type.setdefault(n["type"], []).append(n)
+    for ty in sorted(by_type):
+        lines += [f"## {ty} ({len(by_type[ty])})", ""]
+        for n in by_type[ty]:
+            parts = [n["address"], f"{n['file']}:{n['line']}"]
+            if n.get("key"):
+                parts.append(f"node {n['key']}")
+            if n["reads"]:
+                parts.append(f"reads: {_list(n['reads'])}")
+            if n["writes"]:
+                parts.append(f"writes: {_list(n['writes'])}")
+            if n["pairs"]:
+                parts.append("replicates: " + _list([f"{p['source']} → {p['target']}" for p in n["pairs"]]))
+            if n["unclear"]:
+                parts.append("direction unclear: " + _list(n["unclear"]))
+            lines.append("- " + " · ".join(parts))
+        lines.append("")
+    if res["unresolved_refs"]:
+        lines += ["## Unresolved references", ""]
+        lines += [f"- {u['name']} (in {u['referenced_by']})" for u in res["unresolved_refs"]]
+        lines.append("")
+    if res["errors"]:
+        lines += ["## Parse notes", ""] + [f"- {e}" for e in res["errors"]] + [""]
+    return {f"catalog/terraform/{scan}.md": _fm(res["revision"], scan=scan, type="terraform") + "\n".join(lines).rstrip("\n") + "\n"}
 
 
 def render_edges(edges: dict[str, Any], rev: str) -> dict[str, str]:

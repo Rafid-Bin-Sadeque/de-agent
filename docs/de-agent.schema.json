@@ -45,6 +45,21 @@
       "title": "ConnConfig",
       "type": "object"
     },
+    "EdgesConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore_tables": {
+          "description": "Bookkeeping tables (watermarks, load state) that `dea impact` does not traverse through, e.g. `etl.load_state`. Their own edges stay in `dea edges`.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ignore Tables",
+          "type": "array"
+        }
+      },
+      "title": "EdgesConfig",
+      "type": "object"
+    },
     "GuardConfig": {
       "additionalProperties": false,
       "properties": {
@@ -53,6 +68,14 @@
           "description": "`strict` denies a database write outside an approved plan; `ask` prompts instead of denying.",
           "title": "Mode",
           "type": "string"
+        },
+        "cli_allow": {
+          "description": "Exact command prefixes the CLI write guard lets through, e.g. `dbt run --select staging` (word-for-word prefix of the command, after wrappers). A human edits this; agents cannot.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Cli Allow",
+          "type": "array"
         }
       },
       "title": "GuardConfig",
@@ -92,6 +115,28 @@
       "title": "HubConfig",
       "type": "object"
     },
+    "PackConn": {
+      "additionalProperties": false,
+      "description": "Connection for `type: sql` (pack) sources: a SQLAlchemy URL WITHOUT a password, plus a secret reference.",
+      "properties": {
+        "url": {
+          "description": "SQLAlchemy URL without a password, e.g. `mysql+pymysql://reader@db.example.internal:3306/shop` (driver from the pack's extra).",
+          "title": "Url",
+          "type": "string"
+        },
+        "password": {
+          "default": "none",
+          "description": "Secret reference for the URL's password: `none`, `env:NAME` or `file:/abs/path` (mode 0600). A literal is a load error; so is a password inside the URL.",
+          "title": "Password",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "PackConn",
+      "type": "object"
+    },
     "ScanConfig": {
       "additionalProperties": false,
       "description": "One static scan (M1c). Paths are relative to the hub. Scanned code is parsed, never imported or run.",
@@ -102,7 +147,7 @@
           "type": "string"
         },
         "type": {
-          "description": "Scanner type: airflow, dbt or sql.",
+          "description": "Scanner type: airflow, dbt, sql, python (scripts, notebooks, pyspark) or terraform.",
           "title": "Type",
           "type": "string"
         },
@@ -155,7 +200,7 @@
           "type": "string"
         },
         "globs": {
-          "description": "sql: file globs under `path`.",
+          "description": "sql and python: file globs under `path` (python default: `**/*.py`, `**/*.ipynb`).",
           "items": {
             "type": "string"
           },
@@ -164,7 +209,7 @@
         },
         "dialect": {
           "default": "postgres",
-          "description": "airflow (SQL strings) and sql: sqlglot dialect used to parse SQL.",
+          "description": "airflow and python (SQL strings), sql and terraform: sqlglot dialect used to parse SQL.",
           "title": "Dialect",
           "type": "string"
         }
@@ -186,7 +231,7 @@
           "type": "string"
         },
         "type": {
-          "description": "Collector type: postgres, redshift, airflow, dbt or aws (see docs/collectors.md).",
+          "description": "Collector type: postgres, redshift, airflow, dbt or aws (see docs/collectors.md), or sql, cli or http to run a pack (see docs/packs.md).",
           "title": "Type",
           "type": "string"
         },
@@ -213,14 +258,113 @@
         "conn": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ConnConfig"
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ConnConfig"
+                },
+                {
+                  "$ref": "#/$defs/PackConn"
+                }
+              ]
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Database connection (postgres and redshift sources)."
+          "description": "Database connection: host/dbname/user for postgres and redshift sources; `{url, password}` for `type: sql` pack sources.",
+          "title": "Conn"
+        },
+        "pack": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`type: sql|cli|http` only: the pack to run (`dea pack list`). Its params go in `options:`.",
+          "title": "Pack"
+        },
+        "base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`type: http` only: base URL of the API, as the machine that runs the request sees it.",
+          "title": "Base Url"
+        },
+        "auth": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`type: http` only: `none`, `bearer`, `basic` or `header`.",
+          "title": "Auth"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`type: http` with `auth: basic`: the user name (not a secret).",
+          "title": "User"
+        },
+        "token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`type: http` with `auth: bearer|header`: secret reference.",
+          "title": "Token"
+        },
+        "password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`type: http` with `auth: basic`: secret reference.",
+          "title": "Password"
+        },
+        "header_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`type: http` with `auth: header`: header that carries the token, e.g. `X-Api-Key`.",
+          "title": "Header Name"
         },
         "data_api": {
           "anyOf": [
@@ -264,7 +408,7 @@
         },
         "options": {
           "additionalProperties": true,
-          "description": "Collector-specific options (airflow, dbt, aws); see docs/collectors.md.",
+          "description": "Collector-specific options (airflow, dbt, aws; see docs/collectors.md), or the pack's params for sql, cli and http sources.",
           "title": "Options",
           "type": "object"
         }
@@ -308,6 +452,10 @@
     "guard": {
       "$ref": "#/$defs/GuardConfig",
       "description": "Write-guard behaviour."
+    },
+    "edges": {
+      "$ref": "#/$defs/EdgesConfig",
+      "description": "Lineage graph options."
     }
   },
   "title": "de-agent.yaml",

@@ -16,6 +16,7 @@ SECTIONS = [  # (heading, $defs key or None for the root, yaml path shown in the
     ("`guard`", "GuardConfig", "guard"),
     ("`sources[]`", "SourceConfig", "sources[]"),
     ("`sources[].conn`", "ConnConfig", "sources[].conn"),
+    ("`sources[].conn` (sql pack sources)", "PackConn", "sources[].conn"),
     ("`scans[]`", "ScanConfig", "scans[]"),
 ]
 
@@ -44,7 +45,8 @@ guard: {mode: strict}
 ```
 
 Per-collector `options` and the `aws`, `data_api` and `services` blocks are documented with each collector
-(for Redshift and AWS: [collectors.md](collectors.md)).
+(for Redshift and AWS: [collectors.md](collectors.md)). Sources of `type: sql`, `cli` or `http` run a *pack*
+(`pack: <name>`; its params go in `options:`): see [packs.md](packs.md).
 """
 
 

@@ -1,0 +1,67 @@
+pack: bigquery
+version: 1
+kind: sql
+dialect: bigquery
+requires: {extra: bigquery}
+validated: fixtures      # hand-built from the documented INFORMATION_SCHEMA shapes (fictional values); not run against a live project
+description: Failed jobs, top bytes billed, slot use per hour, largest tables and stale tables for one project region and the datasets you name. The connection sets a maximum_bytes_billed cap (option max_bytes_billed, default 10 GB).
+params:
+  region: {type: ident, default: us, description: "BigQuery region of the INFORMATION_SCHEMA views (us, eu, europe-west2, ...)"}
+  datasets: {type: list, required: true, description: "dataset names to report table sizes and staleness for"}
+sections:
+  - name: job_failures_24h
+    sql: |
+      select job_id, user_email, error_result.reason as reason, error_result.message as message, creation_time
+      from `region-{{region}}`.INFORMATION_SCHEMA.JOBS
+      where error_result is not null and job_type = 'QUERY'
+        and creation_time > timestamp_sub(current_timestamp(), interval 24 hour)
+      order by creation_time desc
+      limit 50
+    key: job_id
+    signals:
+      - rows: "count > 0"
+        message: "{count} failed job(s) in 24h"
+      - when: "reason == 'quotaExceeded' or reason == 'rateLimitExceeded'"
+        message: "job {job_id}: {reason}"
+        severity: error
+  - name: top_bytes_billed_24h
+    sql: |
+      select job_id, user_email, total_bytes_billed, round(total_slot_ms / 1000, 1) as slot_seconds, creation_time
+      from `region-{{region}}`.INFORMATION_SCHEMA.JOBS
+      where job_type = 'QUERY' and total_bytes_billed is not null
+        and creation_time > timestamp_sub(current_timestamp(), interval 24 hour)
+      order by total_bytes_billed desc, job_id
+      limit 10
+    key: job_id
+  - name: slot_use_hourly
+    sql: |
+      select timestamp_trunc(creation_time, hour) as hour_start,
+             round(sum(total_slot_ms) / 3600000, 2) as slot_hours, count(*) as jobs
+      from `region-{{region}}`.INFORMATION_SCHEMA.JOBS
+      where creation_time > timestamp_sub(current_timestamp(), interval 24 hour)
+      group by hour_start
+      order by hour_start desc
+      limit 24
+    key: hour_start
+    volatile: [slot_hours, jobs]
+  - name: largest_tables
+    sql: |
+      select table_schema, table_name, total_logical_bytes, active_logical_bytes
+      from `region-{{region}}`.INFORMATION_SCHEMA.TABLE_STORAGE
+      where table_schema in :datasets
+      order by total_logical_bytes desc, 1, 2
+      limit 20
+    key: [table_schema, table_name]
+  - name: stale_tables
+    sql: |
+      select table_schema, table_name, storage_last_modified_time
+      from `region-{{region}}`.INFORMATION_SCHEMA.TABLE_STORAGE
+      where table_schema in :datasets and deleted = false
+        and storage_last_modified_time < timestamp_sub(current_timestamp(), interval 7 day)
+      order by storage_last_modified_time, 1, 2
+      limit 50
+    key: [table_schema, table_name]
+    signals:
+      - rows: "count > 0"
+        message: "{count} table(s) not modified for 7 days (expected to be fresh? narrow `datasets`)"
+        severity: info

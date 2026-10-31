@@ -11,9 +11,9 @@ import shlex
 from pathlib import Path
 
 from de_agent import pyscan
-from de_agent.clients import SQL_CLIENTS
+from de_agent.clients import CLI_SQL_CLIENTS, SQL_CLIENTS
 
-_NAMES = sorted(set(SQL_CLIENTS) | {"bq", "aws", "dea", "clickhouse"}, key=len, reverse=True)
+_NAMES = sorted(set(SQL_CLIENTS) | set(CLI_SQL_CLIENTS) | {"bq", "aws", "dea", "clickhouse"}, key=len, reverse=True)
 _PY_RE = r"python[0-9.]*"
 _CLIENT_RE = re.compile(r"(?<![\w-])(" + "|".join(re.escape(n) for n in _NAMES) + "|" + _PY_RE + r")(?![\w-])")
 _PY_NAME = re.compile(r"^python[0-9.]*$")
@@ -159,14 +159,26 @@ def _has_subst(s: str) -> bool:
     return "$(" in s or "`" in s or "${" in s
 
 
+_STDIN_FILES = {"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0", "/dev/tty"}
+
+
 def _psql(args: list[str], piped: bool, bodies: list[str], cwd: str | None) -> list[tuple[str, str]]:
     res: list[tuple[str, str]] = []
     stdin_src = False
+    stdin_file = False
     i = 0
     while i < len(args):
         a = args[i]
         val: str | None = None
         kind = None
+        if a in ("-o", "--output", "-L", "--log-file") or (re.fullmatch(r"-[A-Za-z0-9]*[oL]", a) and set(a[1:-1]) <= _NOARG_SHORT):
+            res.append(("psql", "\\o " + (args[i + 1] if i + 1 < len(args) else "")))  # writes a local file: a write
+            i += 2
+            continue
+        if a.startswith(("--output=", "--log-file=")) or (re.match(r"^-[oL].", a) and not a.startswith("--")):
+            res.append(("psql", "\\o " + (a.split("=", 1)[1] if a.startswith("--") else a[2:])))
+            i += 1
+            continue
         if a in ("-c", "--command"):
             kind, val, i = "c", (args[i + 1] if i + 1 < len(args) else None), i + 1
         elif a.startswith("--command="):
@@ -200,14 +212,16 @@ def _psql(args: list[str], piped: bool, bodies: list[str], cwd: str | None) -> l
             else:
                 res.append(("psql", _unreadable("shell substitution") if _has_subst(val) else val))
         elif kind == "f":
-            if val is None or val == "-":
-                pass  # stdin; covered by heredoc/pipe handling
+            if val is None or val in _STDIN_FILES:
+                stdin_file = True  # stdin: readable only from a heredoc / here-string / `<` file; checked after the loop
             else:
                 res.append(("psql-file", _unreadable("shell substitution") if _has_subst(val)
                             else _read_file(val, cwd)))
         i += 1
     if not res and piped and not stdin_src:
         res.append(("psql-stdin", _unreadable("SQL piped on stdin")))
+    elif stdin_file and not stdin_src:
+        res.append(("psql-stdin", _unreadable("SQL read from stdin")))
     return res
 
 
@@ -327,7 +341,8 @@ def _gt(args: list[str]) -> list[tuple[str, str]]:
 # short flag (`-Ne "..."`); positional: SQL may follow the database argument (sqlite3, duckdb); valued: other flags that
 # take a value (skipped when looking for positionals).
 _SPECS: dict[str, dict] = {
-    "mysql": {"inline": ("-e", "--execute"), "files": (), "cluster": "BNsrtvEgGinqwWZ"},
+    "mysql": {"inline": ("-e", "--execute", "--init-command"), "files": (), "cluster": "BNsrtvEgGinqwWZ",
+              "unreadable": ("--defaults-file", "--defaults-extra-file")},
     "snowsql": {"inline": ("-q", "--query"), "files": ("-f", "--filename")},
     "sqlcmd": {"inline": ("-Q", "-q", "--query", "--initial-query"), "files": ("-i", "--input-file")},
     "clickhouse-client": {"inline": ("-q", "--query"), "files": ("--queries-file",)},
@@ -340,6 +355,10 @@ _SPECS: dict[str, dict] = {
     "presto": {"inline": ("--execute",), "files": ("--file", "-f")},
     "spark-sql": {"inline": ("-e",), "files": ("-f", "-i")},
     "beeline": {"inline": ("-e",), "files": ("-f",)},
+    # CLIs with a SQL subcommand: only the arguments after `sql` are read (snow sql -q ..., databricks sql -e ..., dbsqlcli -e ...)
+    "snow": {"inline": ("-q", "--query"), "files": ("-f", "--filename"), "stdin": ("--stdin", "-i")},
+    "databricks": {"inline": ("-e", "--execute", "-q", "--query"), "files": ("-f", "--file")},
+    "dbsqlcli": {"inline": ("-e", "--execute"), "files": ("-f", "--file")},
 }
 _SPEC_ALIAS = {"mariadb": "mysql", "clickhouse-local": "clickhouse-client", "trino-cli": "trino", "presto-cli": "presto"}
 # sqlite3 / duckdb dot-commands that read or print only
@@ -373,6 +392,7 @@ def _generic(client: str, args: list[str], piped: bool, bodies: list[str], cwd: 
     res: list[tuple[str, str]] = []
     pos: list[str] = []
     stdin_src = False
+    stdin_file = False
 
     def add(kind: str, text: str) -> None:
         if _has_subst(text):
@@ -385,12 +405,22 @@ def _generic(client: str, args: list[str], piped: bool, bodies: list[str], cwd: 
     while i < len(args):
         a = args[i]
         nxt = args[i + 1] if i + 1 < len(args) else None
+        if a in spec.get("stdin", ()):
+            stdin_file = True
+            i += 1
+            continue
+        if a.split("=", 1)[0] in spec.get("unreadable", ()):  # a config file can set init commands: SQL we cannot read
+            res.append((client, _unreadable(f"{a.split('=', 1)[0]} can run SQL from a config file")))
+            i += 1 if "=" in a else 2
+            continue
         if a in inline or a in files:
             if nxt is None:
                 res.append((client, _unreadable(f"missing {a} argument")))
             elif a in inline:
                 add("", nxt)
-            elif nxt != "-":
+            elif nxt in _STDIN_FILES:
+                stdin_file = True
+            else:
                 add("-file", _unreadable("shell substitution") if _has_subst(nxt) else _read_file(nxt, cwd))
             i += 2
             continue
@@ -444,6 +474,8 @@ def _generic(client: str, args: list[str], piped: bool, bodies: list[str], cwd: 
             add("", p)
     if not res and piped and not stdin_src:
         res.append((client + "-stdin", _unreadable("SQL piped on stdin")))
+    elif stdin_file and not stdin_src:
+        res.append((client + "-stdin", _unreadable("SQL read from stdin")))
     return res
 
 
@@ -560,6 +592,16 @@ def _handle(words: list[str], piped: bool, bodies: list[str], cwd: str | None, d
                 py = _python(words[k + 1:], piped, bodies, cwd, depth)
                 matched = matched or bool(py)
                 out += py
+        for cli in ("snow", "databricks"):
+            if cli in names:
+                k = names.index(cli)
+                sub = [a for a in words[k + 1:] if not a.startswith("-")][:1]
+                if sub == ["sql"]:
+                    out += _generic(cli, words[words.index("sql", k + 1) + 1:], piped, bodies, cwd)
+                    matched = True
+        if "dbsqlcli" in names:
+            out += _generic("dbsqlcli", words[names.index("dbsqlcli") + 1:], piped, bodies, cwd)
+            matched = True
         if "bq" in names:
             out += _bq(words[names.index("bq") + 1:])
             matched = True

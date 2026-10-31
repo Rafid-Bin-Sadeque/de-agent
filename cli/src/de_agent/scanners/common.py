@@ -13,7 +13,7 @@ from sqlglot import exp
 
 logging.getLogger("sqlglot").setLevel(logging.CRITICAL)
 
-SCANNER_VERSION = 1
+SCANNER_VERSION = 2
 CALL_RE = re.compile(r"^\s*call\s+([A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)*)", re.I)
 JINJA_BLOCK_RE = re.compile(r"\{%.*?%\}", re.S)
 JINJA_EXPR_RE = re.compile(r"\{\{.*?\}\}", re.S)

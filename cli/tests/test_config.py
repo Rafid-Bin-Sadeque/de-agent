@@ -69,7 +69,7 @@ def test_file_ref_must_be_absolute():
 
 
 def test_unknown_type_lists_registered():
-    with pytest.raises(ConfigError, match=r"unknown source type 'mysql'.*registered types: airflow, aws, dbt, postgres, redshift"):
+    with pytest.raises(ConfigError, match=r"unknown source type 'mysql'.*registered types: airflow, aws, cli, dbt, http, postgres, redshift, sql"):
         parse_config(BASE.replace("type: postgres", "type: mysql"))
 
 

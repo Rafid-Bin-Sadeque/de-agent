@@ -127,6 +127,25 @@ services:
       start_period: 40s
     mem_limit: 2g
 
+  reviews-db:
+    # Optional extra for the add-source eval (A1): NOT started by `make demo-up` (profile "extra").
+    # Start it with `docker compose --profile extra up -d --wait reviews-db`.
+    image: mysql:8.4
+    profiles: ["extra"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DEMO_REVIEWS_ROOT_PASSWORD}
+      MYSQL_DATABASE: reviews
+      DEMO_REVIEWS_PASSWORD: ${DEMO_REVIEWS_PASSWORD}
+    ports: ["127.0.0.1:${DEMO_REVIEWS_PORT:-3307}:3306"]
+    volumes:
+      - ./reviews/init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 3s
+      retries: 40
+      start_period: 10s
+    mem_limit: 512m
+
 volumes:
   source-data:
   warehouse-data:

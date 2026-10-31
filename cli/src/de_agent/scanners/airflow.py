@@ -8,226 +8,33 @@ from __future__ import annotations
 import ast
 import itertools
 import re
+import sys
 import warnings
 from pathlib import Path
 from typing import Any
 
+from de_agent.scanners import pycode
 from de_agent.scanners.common import analyze_sql, rel_to
+from de_agent.scanners.pyexpr import (  # noqa: F401
+    CAP,
+    DATASET_NAMES,
+    UNK,
+    DatasetConst,
+    Evaluator,
+    _dotted,
+    _name_of,
+    _targets,
+    _unparse,
+    bind_row,
+    module_consts,
+    pattern_of,
+)
 
+_EXTERNAL_ROOTS = set(getattr(sys, "stdlib_module_names", ())) | {
+    "airflow", "pendulum", "pandas", "numpy", "boto3", "botocore", "requests", "sqlalchemy", "pyspark", "dbt", "pytest",
+    "typing", "yaml", "psycopg2", "psycopg", "pymysql", "snowflake", "google", "azure", "docker", "kubernetes", "jinja2"}
 HOOK_METHODS = {"run", "get_records", "get_first", "get_pandas_df", "execute", "executemany"}
 OPERATOR_RE = re.compile(r"(Operator|Sensor)$")
-DATASET_NAMES = {"Dataset", "Asset"}
-CAP = 500  # max unrolled combinations per expression
-
-
-class DatasetConst(str):
-    """Module-level `X = Dataset("uri")`: a str (the URI) that remembers it is a Dataset reference."""
-
-
-class _Unknown:
-    """Loop variable over something we cannot enumerate."""
-
-
-UNK = _Unknown()
-
-
-def _name_of(node: ast.AST) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
-
-
-def _dotted(node: ast.AST) -> list[str] | None:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-        return parts[::-1]
-    return None
-
-
-def _unparse(node: ast.AST, limit: int = 80) -> str:
-    try:
-        return ast.unparse(node)[:limit]
-    except Exception:  # pragma: no cover
-        return "?"
-
-
-def pattern_of(node: ast.AST) -> str:
-    """`export_{x}` style pattern for a non-constant id expression."""
-    if isinstance(node, ast.JoinedStr):
-        out = ""
-        for v in node.values:
-            if isinstance(v, ast.Constant):
-                out += str(v.value)
-            elif isinstance(v, ast.FormattedValue):
-                out += "{" + _unparse(v.value, 30) + "}"
-        return out
-    if isinstance(node, ast.Constant):
-        return str(node.value)
-    return "{" + _unparse(node, 40) + "}"
-
-
-class Evaluator:
-    """Resolve expressions to string values using module-level constants and loop/parameter scopes."""
-
-    def __init__(self, consts: dict[str, Any]) -> None:
-        self.consts = consts
-
-    def iter_values(self, node: ast.AST, scopes: dict[str, Any]) -> list[Any] | None:
-        """Values of `for x in <node>` when it is a constant list/tuple/dict-keys/range; else None."""
-        val: Any = None
-        if isinstance(node, ast.Name):
-            if node.id in scopes and isinstance(scopes[node.id], list):
-                val = scopes[node.id]
-            else:
-                val = self.consts.get(node.id)
-        elif isinstance(node, (ast.List, ast.Tuple)):
-            try:
-                val = ast.literal_eval(node)
-            except ValueError:
-                return None
-        elif isinstance(node, ast.Call) and _name_of(node.func) == "range" and node.args:
-            args = []
-            for a in node.args:
-                vs, _ = self.strings(a, scopes)
-                if not vs or len(vs) != 1 or not vs[0].lstrip("-").isdigit():
-                    return None
-                args.append(int(vs[0]))
-            r = range(*args)
-            return list(r) if len(r) <= CAP else None
-        if isinstance(val, dict):
-            val = list(val.keys())
-        if isinstance(val, (list, tuple)) and len(val) <= CAP and all(isinstance(v, (str, int)) for v in val):
-            return list(val)
-        return None
-
-    def strings(self, node: ast.AST, scopes: dict[str, Any]) -> tuple[list[str] | None, bool]:
-        """(possible values, used_a_loop_or_param) ; values None when dynamic."""
-        if isinstance(node, ast.Constant):
-            return ([node.value] if isinstance(node.value, str) else [str(node.value)]), False
-        if isinstance(node, ast.Name):
-            if node.id in scopes:
-                v = scopes[node.id]
-                if v is UNK or not isinstance(v, list):
-                    return None, True
-                return [str(x) for x in v], True
-            c = self.consts.get(node.id)
-            if isinstance(c, (str, int)):
-                return [str(c)], False
-            return None, False
-        if isinstance(node, ast.JoinedStr):
-            parts: list[list[str]] = []
-            unrolled = False
-            for v in node.values:
-                if isinstance(v, ast.Constant):
-                    parts.append([str(v.value)])
-                elif isinstance(v, ast.FormattedValue):
-                    vs, u = self.strings(v.value, scopes)
-                    if vs is None:
-                        return None, u
-                    unrolled |= u
-                    parts.append(vs)
-            return self._product(parts), unrolled
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            a, ua = self.strings(node.left, scopes)
-            b, ub = self.strings(node.right, scopes)
-            if a is None or b is None:
-                return None, ua or ub
-            return self._product([a, b]), ua or ub
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
-            base, ub = self.strings(node.func.value, scopes)
-            if base is None:
-                return None, ub
-            argv = []
-            for a in [*node.args, *[k.value for k in node.keywords if k.arg]]:
-                vs, u = self.strings(a, scopes)
-                if vs is None:
-                    return None, u
-                ub |= u
-                argv.append(vs)
-            if len(node.args) + len([k for k in node.keywords if k.arg]) != len(node.args) + len(node.keywords):
-                return None, ub
-            out = []
-            kwn = [k.arg for k in node.keywords if k.arg]
-            for combo in itertools.islice(itertools.product(*argv), CAP):
-                pos, kw = combo[:len(node.args)], dict(zip(kwn, combo[len(node.args):]))
-                for b in base:
-                    try:
-                        out.append(b.format(*pos, **kw))
-                    except (IndexError, KeyError, ValueError):
-                        return None, ub
-            return out, ub
-        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
-            base = self.consts.get(node.value.id)
-            ks, _ = self.strings(node.slice, scopes)
-            if isinstance(base, dict) and ks and len(ks) == 1 and ks[0] in {str(k) for k in base}:
-                item = next(v for k, v in base.items() if str(k) == ks[0])
-                if isinstance(item, (str, int)):
-                    return [str(item)], False
-        return None, False
-
-    @staticmethod
-    def _product(parts: list[list[str]]) -> list[str] | None:
-        n = 1
-        for p in parts:
-            n *= max(len(p), 1)
-        if n > CAP:
-            return None
-        return ["".join(c) for c in itertools.product(*parts)]
-
-
-def module_consts(tree: ast.Module) -> dict[str, Any]:
-    """Module-level NAME = <literal> assigned exactly once (then simple f-string/concat of earlier constants)."""
-    counts: dict[str, int] = {}
-    for node in tree.body:
-        for tgt in _targets(node):
-            counts[tgt] = counts.get(tgt, 0) + 1
-    consts: dict[str, Any] = {}
-    ev = Evaluator(consts)
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-            name, value = node.targets[0].id, node.value
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
-            name, value = node.target.id, node.value
-        else:
-            continue
-        if counts.get(name) != 1:
-            continue
-        try:
-            consts[name] = ast.literal_eval(value)
-            continue
-        except (ValueError, SyntaxError):
-            pass
-        if isinstance(value, (ast.JoinedStr, ast.BinOp)):
-            vs, _ = ev.strings(value, {})
-            if vs and len(vs) == 1:
-                consts[name] = vs[0]
-        elif isinstance(value, ast.Call) and _name_of(value.func) in DATASET_NAMES:
-            kw = {k.arg: k.value for k in value.keywords if k.arg}
-            arg = kw.get("uri") or (value.args[0] if value.args else None) or kw.get("name")
-            vs, _ = ev.strings(arg, {}) if arg is not None else (None, False)
-            if vs and len(vs) == 1:
-                consts[name] = DatasetConst(vs[0])
-    return consts
-
-
-def _targets(node: ast.stmt) -> list[str]:
-    out: list[str] = []
-    if isinstance(node, ast.Assign):
-        for t in node.targets:
-            out += [n.id for n in ast.walk(t) if isinstance(n, ast.Name)]
-    elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and isinstance(node.target, ast.Name):
-        out.append(node.target.id)
-    elif isinstance(node, (ast.For, ast.With, ast.If, ast.Try)):
-        for sub in ast.walk(node):
-            if isinstance(sub, ast.Assign):
-                out += [n.id for t in sub.targets for n in ast.walk(t) if isinstance(n, ast.Name)]
-    return out
 
 
 class Instance:
@@ -253,6 +60,7 @@ class FileScanner:
         self.funcs: dict[str, ast.FunctionDef] = {}
         self._collect_imports_and_funcs()
         self.fsql: dict[str, list[dict[str, Any]]] = {}
+        self.fucalls: dict[str, list[dict[str, Any]]] = {}
         self.stats = {"unresolved_sql": 0, "unresolved_datasets": 0, "unparsed_sql": 0}
 
     # ---------------- imports, symbols ----------------
@@ -376,6 +184,7 @@ class FileScanner:
             rec = self._new_acc()
             self._visit_body(fn.body, {}, rec, None)
             self.fsql[name] = rec["sql"]
+            self.fucalls[name] = rec["ucalls"]
         dags: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
         for inst in instances:
@@ -390,11 +199,13 @@ class FileScanner:
             for n in sorted(names & set(self.fsql)):
                 referenced.add(n)
                 self._merge_sql(d, self.fsql[n])
+                self._merge_ucalls(d, self.fucalls[n])
         loose = [s for n, v in self.fsql.items() if n not in referenced for s in v]
         unattributed = 0
         if loose:
             if len(dags) == 1:
                 self._merge_sql(dags[0], loose)
+                self._merge_ucalls(dags[0], [c for n, v in self.fucalls.items() if n not in referenced for c in v])
             else:
                 unattributed = len(loose)
         for d in dags:
@@ -405,7 +216,7 @@ class FileScanner:
 
     def _new_acc(self) -> dict[str, Any]:
         return {"sql": [], "operators": set(), "outlets": [], "inlets": [], "sensors": set(), "triggers": set(),
-                "pools": set(), "names": set(), "searchpaths": set(), "has_task": False}
+                "pools": set(), "names": set(), "searchpaths": set(), "has_task": False, "ucalls": []}
 
     def _expand(self, inst: Instance) -> list[dict[str, Any]]:
         """One or more DAG entries for a discovered construction (factory call sites, loops)."""
@@ -511,7 +322,7 @@ class FileScanner:
         d.update({"operators": sorted(acc["operators"]), "outlets": acc["outlets"], "inlets": acc["inlets"],
                   "sensors": sorted(acc["sensors"]), "triggers": sorted(acc["triggers"]),
                   "pools": sorted(acc["pools"]), "sql": acc["sql"], "searchpaths": sorted(acc["searchpaths"]),
-                  "_names": acc["names"]})
+                  "ucalls": acc["ucalls"], "_names": acc["names"]})
         return d
 
     @staticmethod
@@ -522,6 +333,14 @@ class FileScanner:
             if key not in have:
                 d["sql"].append(r)
                 have.add(key)
+
+    @staticmethod
+    def _merge_ucalls(d: dict[str, Any], recs: list[dict[str, Any]]) -> None:
+        have = {repr(sorted(r.items())) for r in d["ucalls"]}
+        for r in recs:
+            if repr(sorted(r.items())) not in have:
+                d["ucalls"].append(r)
+                have.add(repr(sorted(r.items())))
 
     def _finish_dag(self, d: dict[str, Any]) -> None:
         reads: set[str] = set()
@@ -557,6 +376,16 @@ class FileScanner:
             self._visit_body(node.body, scopes, acc, var)
             return
         if isinstance(node, ast.For):
+            rows = self.ev.iter_rows(node.iter, scopes) if not isinstance(node.target, ast.Name) else None
+            if rows is not None:  # `for a, b in D.items()` / zip(..): one visit per row keeps the names correlated
+                self._visit(node.iter, scopes, acc, var)
+                for row in rows:
+                    inner_row = bind_row(node.target, row, scopes)
+                    for ch in node.body:
+                        self._visit(ch, inner_row, acc, var)
+                for ch in node.orelse:
+                    self._visit(ch, scopes, acc, var)
+                return
             it = self.ev.iter_values(node.iter, scopes)
             inner = dict(scopes)
             for n in (x.id for x in ast.walk(node.target) if isinstance(x, ast.Name)):
@@ -583,6 +412,7 @@ class FileScanner:
                 return
         if OPERATOR_RE.search(name):
             acc["operators"].add(name)
+        self._ucalls(call, kws, scopes, acc)
         line = call.lineno
         if "outlets" in kws:
             self._datasets(kws["outlets"], scopes, acc, "outlets", line)
@@ -604,6 +434,49 @@ class FileScanner:
         for sn in sql_nodes:
             for leaf in (sn.elts if isinstance(sn, (ast.List, ast.Tuple)) else [sn]):
                 self._sql(leaf, scopes, acc, line, explicit="sql" in kws and leaf is kws["sql"])
+
+    def _spec(self, node: ast.AST, scopes: dict[str, Any]) -> tuple[list[str] | None, bool]:
+        vs, used = self.ev.strings(node, scopes)
+        if vs is None and isinstance(node, (ast.List, ast.Tuple, ast.Name, ast.Call)):
+            rows = self.ev.iter_rows(node, scopes)
+            if rows and all(isinstance(r, (str, int)) and not isinstance(r, bool) for r in rows):
+                return [str(r) for r in rows][:CAP], True
+        return (vs[:CAP] if vs is not None else None), used
+
+    def _ucalls(self, call: ast.Call, kws: dict[str, ast.AST], scopes: dict[str, Any], acc: dict[str, Any]) -> None:
+        """Record calls to imported functions (candidate utils) with their argument values; resolved in `assemble`."""
+        targets: list[tuple[ast.AST, list[ast.AST], dict[str, ast.AST]]] = [(call.func, list(call.args), kws)]
+        pc = kws.get("python_callable")
+        if pc is not None:  # PythonOperator(python_callable=fn, op_args=[..], op_kwargs={..})
+            oa, ok = kws.get("op_args"), kws.get("op_kwargs")
+            kwargs: dict[str, ast.AST] = {}
+            if isinstance(ok, ast.Dict):
+                for k, v in zip(ok.keys, ok.values):
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                        kwargs[k.value] = v
+            targets.append((pc, list(oa.elts) if isinstance(oa, (ast.List, ast.Tuple)) else [], kwargs))
+        for fnode, args, kw in targets:
+            d = _dotted(fnode)
+            if not d or d[0] not in self.aliases:
+                continue
+            callee = ".".join([self.aliases[d[0]], *d[1:]])
+            if callee.split(".")[0] in _EXTERNAL_ROOTS:
+                continue
+            specs, used = [], False
+            for a in args:
+                if isinstance(a, ast.Starred):
+                    break
+                s, u = self._spec(a, scopes)
+                specs.append(s)
+                used = used or u
+            kwspecs = {}
+            for k, v in kw.items():
+                s, u = self._spec(v, scopes)
+                kwspecs[k] = s
+                used = used or u
+            rec = {"callee": callee, "local": False, "line": call.lineno, "args": specs, "kw": kwspecs, "unrolled": used}
+            if rec not in acc["ucalls"] and len(acc["ucalls"]) < pycode.MAX_RECS:
+                acc["ucalls"].append(rec)
 
     def _datasets(self, node: ast.AST, scopes: dict[str, Any], acc: dict[str, Any], bucket: str, line: int) -> None:
         for sub in ast.walk(node):
@@ -648,6 +521,15 @@ def scan_python(src: str, rel: str, dialect: str) -> dict[str, Any]:
                 "dynamic_calls": 0, "defs": [], "stats": {}}
     res = fs.scan()
     res["rel"] = rel
+    try:
+        code = pycode.CodeScanner(fs.tree, rel, dialect).scan()
+        res["funcs"] = {k: v for k, v in code["funcs"].items() if k != "<module>"}
+        if rel.endswith("__init__.py"):
+            res["imports"] = code["imports"]
+    except Exception as ex:  # a scanner bug must not lose the DAG results; surfaced in the stats
+        res["funcs"] = {}
+        res["stats"]["util_scan_errors"] = 1
+        res["util_error"] = f"{type(ex).__name__}: {str(ex)[:80]}"
     return res
 
 
@@ -720,7 +602,9 @@ def assemble(scan: Any, root: Path, per_file: dict[str, dict[str, Any]], util_fi
     dags: list[dict[str, Any]] = []
     stats = {"dag_files": len(dag_files), "dags": 0, "dynamic_dags": 0, "unresolved_calls": 0,
              "unresolved_sql": 0, "unresolved_datasets": 0, "unparsed_sql": 0, "unattributed_sql": 0,
-             "unresolved_sql_files": 0, "parse_errors": 0}
+             "unresolved_sql_files": 0, "parse_errors": 0, "unresolved_util_args": 0, "util_scan_errors": 0}
+    graph = pycode.UtilGraph({r: {"funcs": pf.get("funcs", {}), "imports": pf.get("imports", {})}
+                              for r, pf in per_file.items()}, scan.dialect, explicit=util_files)
     for rel in sorted(dag_files):
         pf = per_file.get(rel)
         if not pf:
@@ -728,7 +612,7 @@ def assemble(scan: Any, root: Path, per_file: dict[str, dict[str, Any]], util_fi
         if pf.get("error"):
             stats["parse_errors"] += 1
         stats["unresolved_calls"] += pf["star_imports"] + pf["dynamic_calls"]
-        for k in ("unresolved_sql", "unresolved_datasets", "unparsed_sql", "unattributed_sql"):
+        for k in ("unresolved_sql", "unresolved_datasets", "unparsed_sql", "unattributed_sql", "util_scan_errors"):
             stats[k] += pf["stats"].get(k, 0)
         used = set()
         for u in pf["uses"]:
@@ -766,6 +650,7 @@ def assemble(scan: Any, root: Path, per_file: dict[str, dict[str, Any]], util_fi
             d["inlets"] = sorted({o["uri"] for o in d["inlets"] if o.get("uri")})
             d["reads"], d["writes"], d["calls"] = sorted(reads), sorted(writes), sorted(calls)
             d["sql"] = [{k: v for k, v in r.items() if k != "text"} for r in d["sql"]]
+            d["util_edges"] = graph.inherited(rel, d.pop("ucalls", []))
             dags.append(d)
             stats["dags"] += 1
             stats["dynamic_dags"] += 1 if d["dynamic"] else 0
@@ -773,6 +658,7 @@ def assemble(scan: Any, root: Path, per_file: dict[str, dict[str, Any]], util_fi
         for sym in used:
             symbols[sym]["dags"].extend({"dag_id": i, "file": rel} for i in dag_ids_in_file)
     dags.sort(key=lambda d: (d["folder"], d["dag_id"], d["file"], d["line"]))
+    stats["unresolved_util_args"] = graph.unresolved
     for s in symbols.values():
         s["files"] = sorted(set(s["files"]))
         s["dags"] = sorted({(x["dag_id"], x["file"]) for x in s["dags"]})

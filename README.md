@@ -3,7 +3,7 @@
 For data engineers using Claude Code on Postgres, Redshift, Airflow, dbt and AWS.
 
 Ground-truth context, enforced guardrails and workflows for data engineering with [Claude Code](https://claude.com/claude-code).
-Status: v0.1.0. Apache-2.0.
+Status: v0.2.0. Apache-2.0.
 
 > **New to this?** Read [docs/START_HERE.md](docs/START_HERE.md) first. It explains everything in plain words, with pictures,
 > in about 10 minutes.
@@ -40,7 +40,8 @@ but is allowed to write freely is worse.
 
 - **A generated map of the live platform.** Read-only collectors snapshot Postgres, Redshift, Airflow, dbt and AWS into timestamped
   pages with signals on top ("dag extract_shop: 2 failed runs in 24h"), and `dea diff` shows what changed since last time.
-- **Lineage and a fast lookup, from your code.** Static scanners turn Airflow DAGs, dbt manifests and SQL files into table-level edges:
+- **Lineage and a fast lookup, from your code.** Static scanners turn Airflow DAGs (with the shared utilities they call), dbt manifests, SQL files,
+  Python scripts, notebooks, pyspark jobs and Terraform into table-level edges:
   `dea impact orders` lists every reader downstream, and `dea find` searches exact identifiers without a vector database.
 - **Guardrails that are enforced, not requested.** Hooks deny a database write outside an approved plan, a credential in the transcript, an
   agent approving its own plan, and "fixing" a failing dbt test by deleting it.
@@ -82,8 +83,9 @@ The plugin (skills, agents, hooks) and the CLI (`dea`) install separately; both 
 uv tool install 'de-agent[pg,aws]'     # or: pipx install 'de-agent[pg,aws]'
 ```
 
-Extras: `pg` adds the `psycopg` driver (Postgres and Redshift collectors and `dea query` without shelling out to `psql`); `aws` adds
-`boto3` (AWS collectors and the Redshift Data API). Install only the ones you use. `dea doctor` checks the environment, including the
+Extras: `pg` adds the `psycopg` driver (Postgres and Redshift collectors and `dea query` without shelling out to `psql`) and SQLAlchemy;
+`aws` adds `boto3` (AWS collectors and the Redshift Data API); `mysql`, `snowflake`, `bigquery`, `databricks` and `mssql` add the
+driver for that system's SQL pack; `terraform` adds an HCL parser for the Terraform scan; `all` installs every extra. Install only the ones you use. `dea doctor` checks the environment, including the
 python3 the hooks will run.
 
 ## 60-second tour (demo fault 01)
@@ -144,6 +146,10 @@ Or open Claude Code in an empty folder and say "set up de-agent" (the `hub-init`
 
 ## Supported systems
 
+Three tiers.
+
+**1. Deep collectors** (hand-written, richest signals): Postgres 12-17, Redshift, Airflow 2.x and 3.x, dbt, AWS.
+
 | system | what it reads | notes |
 |---|---|---|
 | Postgres 12-17 | connections, locks, bloat, vacuum and xid age, slots, settings, largest tables | collector, `dea query`, and plan targets (`writable: true`) |
@@ -151,15 +157,33 @@ Or open Claude Code in an empty folder and say "set up de-agent" (the `hub-init`
 | Airflow 2.x and 3.x | DAG runs, failures with log tails, import errors, paused DAGs, datasets | REST API |
 | dbt 1.6-1.9 | failing models and tests, slowest nodes, freshness, exposures | reads `manifest.json`, `run_results.json`, `sources.json` |
 | AWS | DMS tasks and CDC latency, Glue jobs, S3 prefixes, Athena, Firehose, CloudWatch alarms | `Describe*`/`List*`/`Get*` only; `[aws]` extra; [IAM policy](docs/aws-iam-readonly.json) |
-| Scanners | Airflow DAGs and shared utilities, dbt lineage, SQL files (procs, views) | parsed with sqlglot, never imported or run |
 
-Others (Snowflake, BigQuery, MySQL, Kafka) are not collected yet: [docs/writing-a-collector.md](docs/writing-a-collector.md).
+**2. Packs** (a YAML file over SQL, a CLI or an HTTP API, read-only in code; [docs/packs.md](docs/packs.md)). `validated: live` means it was run against a real
+system in the test suite; `fixtures` means hand-built from the vendor's documentation with fictional values, not yet run against a live system.
+
+| pack | kind | reads | extra | validated |
+|---|---|---|---|---|
+| `postgres-lite` | sql | long-running and blocked sessions, dead tuples, table sizes | `pg` | live |
+| `mysql` | sql | processlist, InnoDB lock waits, replica lag, top tables | `mysql` | live |
+| `snowflake` | sql | warehouses, failed and queued queries, credit use, tasks, pipes, storage | `snowflake` | fixtures |
+| `bigquery` | sql | job failures, bytes billed, slot use, largest and stale tables | `bigquery` | fixtures |
+| `databricks` | cli | job runs, clusters, SQL warehouses | none (the `databricks` CLI) | fixtures |
+| `databricks-system` | sql | system tables: job failures, billing usage, failed statements | `databricks` | fixtures |
+| `mssql` | sql | blocking, long requests, SQL Agent failures, top tables | `mssql` | fixtures |
+| `gcp` | cli | Composer, Dataflow failures, Pub/Sub, newest objects per prefix | none (`gcloud`) | fixtures |
+| `kubernetes` | cli | pods not running, CrashLoopBackOff, failed Jobs and CronJobs | none (`kubectl`) | fixtures |
+| `dagster` | http (GraphQL) | failed runs, stopped schedules and sensors | none | fixtures |
+| `fivetran` | http | connectors failing, paused or stale | none | fixtures |
+
+**3. Any other system:** anything with SQL, a CLI or an HTTP API. `dea pack new <name> --kind sql|cli|http`, or ask Claude ("we also use X": the `add-source` skill).
+
+**Scanners** (parse your code with `ast`, sqlglot and, with the optional `[terraform]` extra, python-hcl2; never import or run it): Airflow DAGs and the shared utilities they call (up to 2 hops, loops over config lists unrolled), dbt lineage, SQL files in any sqlglot dialect (procs, views), Python and pyspark (`execute`, `read_sql`, `spark.table`, `saveAsTable`, paths), Jupyter and Databricks notebooks, Terraform (DMS, Glue, Firehose, BigQuery, Snowflake, Pub/Sub, buckets). [docs/writing-a-scanner.md](docs/writing-a-scanner.md)
 
 ## Safety model
 
 The primary control is a read-only database role for the agent. On top of it: `dea query` runs inside a read-only transaction; `sql_guard`
 denies database writes (and anything it cannot parse) unless the `executor` agent runs a statement from a plan you signed; `secret_guard`
-blocks credentials and key files; `approval_guard` keeps `dea approve` human-only; `test_guard` blocks removing or weakening dbt tests; `self_guard` stops agents editing the guards, the guard mode or the hook settings.
+blocks credentials and key files; `cli_guard` denies writes through `aws`, `gcloud`, `kubectl`, `terraform`, `dbt`, `airflow` and the other data CLIs (an unknown verb is denied too), recursing into `docker exec` and `kubectl exec`; `approval_guard` keeps `dea approve` human-only; `test_guard` blocks removing or weakening dbt tests; `self_guard` stops agents editing the guards, the guard mode or the hook settings.
 These stop accidents and casual bypass. They are not a sandbox against a hostile local process, and a program that reaches the database
 in a way the heuristics cannot read (Python scripts that import a driver are scanned, nothing more) is not seen. Read what each layer stops and what none can: [docs/SAFETY.md](docs/SAFETY.md).
 
@@ -179,6 +203,7 @@ in a way the heuristics cannot read (Python scripts that import a driver are sca
 | `dea plan check <id>` / `dea plans` | validate a plan file; list plans by state |
 | `dea approve <id>` | HUMAN ONLY: review the check, type the id, sign the statement hashes (needs a TTY) |
 | `dea apply <id>` | executor agent only: verify the signature, run the steps, verify each |
+| `dea pack list` / `show` / `new` / `check` / `test` | list, print, scaffold, validate and run packs (declarative sources) |
 | `dea config schema` | JSON Schema or markdown reference for `de-agent.yaml` |
 | `dea guard-test` | run the SQL classifier corpus |
 
@@ -189,6 +214,7 @@ Say what you want; the matching skill loads. All of them are read-only until the
 | skill | for |
 |---|---|
 | `hub-init`, `onboard-project`, `hub-sync` | create a hub, add a repo to it, sync it at the end of a session |
+| `add-source` | "we also use Snowflake": find or draft a pack, check it, add the source, test it |
 | `pipeline-check`, `incident-triage` | "is X healthy?", "why is Y stale?" with cited evidence |
 | `plan`, `backfill`, `schema-change`, `new-pipeline` | write a reviewable plan for a change |
 | `audit` | capacity and health audit of Postgres or Redshift |

@@ -1,0 +1,64 @@
+pack: kubernetes
+version: 1
+kind: cli
+requires: {cli: kubectl}
+validated: fixtures      # hand-built from the documented `kubectl get -o json` shapes (fictional values); not run against a live cluster
+description: Pods that are not Running or Completed, CrashLoopBackOff containers, failed Jobs and CronJobs that have not succeeded since their last schedule, in the namespaces you list.
+params:
+  namespaces: {type: list, required: true, description: "namespaces to inspect (named; there is no cluster-wide listing)"}
+sections:
+  - name: pods_not_running
+    run: [kubectl, get, pods, -n, "{{item}}", -o, json]
+    for_each: namespaces
+    item_as: namespace
+    select: "items[?status.phase != 'Running' && status.phase != 'Succeeded']"
+    fields: {name: metadata.name, phase: status.phase, reason: status.reason}
+    columns: [namespace, name, phase, reason]
+    key: [namespace, name]
+    signals:
+      - when: "phase == 'Failed' or phase == 'Unknown'"
+        message: "pod {namespace}/{name} is {phase} ({reason})"
+        severity: error
+      - when: "phase == 'Pending'"
+        message: "pod {namespace}/{name} is Pending"
+  - name: crashloop_pods
+    run: [kubectl, get, pods, -n, "{{item}}", -o, json]
+    for_each: namespaces
+    item_as: namespace
+    select: "items[?length(status.containerStatuses[?state.waiting.reason=='CrashLoopBackOff'] || `[]`) > `0`]"
+    fields: {name: metadata.name, restarts: "max(status.containerStatuses[].restartCount)"}
+    columns: [namespace, name, restarts]
+    key: [namespace, name]
+    volatile: [restarts]
+    signals:
+      - when: "name != None"
+        message: "pod {namespace}/{name} is in CrashLoopBackOff ({restarts} restarts)"
+        severity: error
+  - name: failed_jobs
+    run: [kubectl, get, jobs, -n, "{{item}}", -o, json]
+    for_each: namespaces
+    item_as: namespace
+    select: "items[?status.failed > `0`]"
+    fields: {name: metadata.name, failed: status.failed, start_time: status.startTime}
+    columns: [namespace, name, failed, start_time]
+    key: [namespace, name]
+    signals:
+      - when: "failed > 0"
+        message: "job {namespace}/{name} has {failed} failed pod(s)"
+        severity: error
+  - name: cronjobs
+    run: [kubectl, get, cronjobs, -n, "{{item}}", -o, json]
+    for_each: namespaces
+    item_as: namespace
+    select: "items"
+    fields: {name: metadata.name, schedule: spec.schedule, suspended: spec.suspend, last_schedule: status.lastScheduleTime, last_success: status.lastSuccessfulTime}
+    columns: [namespace, name, schedule, suspended, last_schedule, last_success]
+    key: [namespace, name]
+    volatile: [last_schedule, last_success]
+    signals:
+      - when: "last_schedule != None and last_success == None"
+        message: "cronjob {namespace}/{name} has been scheduled but never succeeded"
+        severity: error
+      - when: "last_schedule > last_success"
+        message: "cronjob {namespace}/{name}: last run after {last_success} did not succeed"
+        severity: warn

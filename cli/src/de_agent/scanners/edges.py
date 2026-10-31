@@ -6,6 +6,8 @@ import re
 from collections import deque
 from typing import Any
 
+from de_agent.scanners.pycode import is_path
+
 MAX_DEPTH = 3
 
 
@@ -139,7 +141,35 @@ def _aws_edges(platform: list[dict[str, Any]], put_node: Any, unresolved: list[d
     return n
 
 
-def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _record_edges(put: Any, procs: dict[str, dict[str, Any]], unresolved: list[dict[str, str]], base: dict[str, Any],
+                  rec: dict[str, Any], via: str, file: str) -> None:
+    """Edges for one SQL/table record (`reads`, `writes`, `calls`) of an owner."""
+    e = {**base, "via": via, "file": file}
+    for k in ("hops",):
+        if rec.get(k):
+            e[k] = rec[k]
+    if rec.get("heuristic"):
+        e["heuristic"] = True
+    if rec.get("unrolled"):
+        e["unrolled"] = True
+    for t in rec["writes"]:
+        put(t, "writers", e)
+    for t in rec["reads"]:
+        put(t, "readers", e)
+    for name in rec["calls"]:
+        p = _find_proc(procs, name)
+        if p is None:
+            unresolved.append({"kind": "proc", "name": name, "referenced_by": base["id"]})
+            continue
+        pe = {**e, "proc": p["name"]}
+        for t in p["writes"]:
+            put(t, "writers", pe)
+        for t in p["reads"]:
+            put(t, "readers", pe)
+
+
+def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | None = None,
+                ignore_tables: list[str] | tuple[str, ...] = ()) -> dict[str, Any]:
     tables: dict[str, dict[str, dict[str, Any]]] = {}
     unresolved: list[dict[str, str]] = []
     dag_links: list[dict[str, str]] = []
@@ -149,7 +179,7 @@ def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | 
 
     def put(table: str, side: str, edge: dict[str, Any]) -> None:
         nonlocal unqualified
-        if "." not in table:
+        if "." not in table and not is_path(table):
             unqualified += 1
             return
         _add(tables, table, side, edge)
@@ -198,6 +228,8 @@ def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | 
                         put(t, "writers", {**base, "via": "proc", "proc": p["name"]})
                     for t in p["reads"]:
                         put(t, "readers", {**base, "via": "proc", "proc": p["name"]})
+                for ue in d.get("util_edges", []):
+                    _record_edges(put, procs, unresolved, base, ue, ue["via"], f"{d['file']}:{ue['line']}")
                 for u in d["outlets"]:
                     outlets.setdefault(u, []).append(d["dag_id"])
                 for u in d["inlets"]:
@@ -222,6 +254,27 @@ def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | 
                 for t in e["reads"]:
                     put(t, "readers", {"id": f"exposure:{e['name']}", "project": proj, "scan": scan, "via": "dbt",
                                        "file": e["file"]})
+        elif r["type"] == "python":
+            for o in r["owners"]:
+                base = {"id": o["id"], "project": proj, "scan": scan}
+                dvia = "notebook" if o["kind"] == "notebook" else "python"
+                for rec in o["direct"]:
+                    _record_edges(put, procs, unresolved, base, rec, dvia, rec["file"])
+                for rec in o["util"]:
+                    _record_edges(put, procs, unresolved, base, rec, rec["via"], rec["file"])
+        elif r["type"] == "terraform":
+            for n in r["nodes"]:
+                base = {"id": n["id"], "project": proj, "scan": scan, "via": "terraform", "file": f"{n['file']}:{n['line']}"}
+                for k in n["reads"]:
+                    _add(tables, k, "readers", {**base, "unclear": True} if k in n["unclear"] else base)
+                for k in n["writes"]:
+                    _add(tables, k, "writers", base)
+                for pr in n["pairs"]:
+                    extra = {"pattern": True} if pr.get("pattern") else {}
+                    _add(tables, pr["source"], "readers", {**base, **extra, "target": pr["target"]})
+                    _add(tables, pr["target"], "writers", {**base, **extra, "source": pr["source"]})
+            unresolved.extend({"kind": u["kind"], "name": u["name"], "referenced_by": u["referenced_by"]}
+                              for u in r["unresolved_refs"])
         elif r["type"] == "sql":
             for o in r["objects"]:
                 oid = f"{o['kind'].split()[-1] if o['kind'] != 'materialized view' else 'mview'}:{o['name']}"
@@ -264,13 +317,20 @@ def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | 
         for k, v in r.get("stats", {}).items():
             if k.startswith(("unresolved", "unparsed", "unattributed")):
                 stats[f"{r['scan']}.{k}"] = v
-    return {"tables": out_tables, "cross_project": cross, "dag_links": sorted(
+    out = {"tables": out_tables, "cross_project": cross, "dag_links": sorted(
         dag_links, key=lambda x: (x["from"], x["to"], x["via"])), "unresolved": unresolved_dedup, "stats": stats}
+    if ignore_tables:
+        out["ignore_tables"] = sorted({t.lower() for t in ignore_tables})
+    return out
 
 
-def downstream(edges: dict[str, Any], table: str, depth: int = MAX_DEPTH) -> list[dict[str, Any]]:
-    """Readers of `table` and, transitively, of the tables those readers write; a reader's depth = its hop count."""
+def downstream(edges: dict[str, Any], table: str, depth: int = MAX_DEPTH,
+               ignore: list[str] | tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+    """Readers of `table` and, transitively, of the tables those readers write; a reader's depth = its hop count.
+    Tables in `ignore` (default: `edges.ignore_tables` from the config, stored in the graph) are bookkeeping: a reader that
+    writes one does not carry the traversal into it. Asking about an ignored table directly still lists its readers."""
     tables = edges["tables"]
+    skip = {t.lower() for t in (edges.get("ignore_tables", []) if ignore is None else ignore)}
     written_by: dict[str, set[str]] = {}
     for t, v in tables.items():
         for w in v["writers"]:
@@ -292,7 +352,7 @@ def downstream(edges: dict[str, Any], table: str, depth: int = MAX_DEPTH) -> lis
                         "path": [*path, f"[{rd['id']}]"]})
             nxt = [rd["target"]] if rd.get("target") else sorted(written_by.get(rd["id"], ()))  # DMS edges are table pairs
             for t2 in nxt:
-                if t2 not in seen_tables:
+                if t2 not in seen_tables and t2 not in skip:
                     seen_tables.add(t2)
                     q.append((t2, d + 1, [*path, f"[{rd['id']}]", t2]))
     return out

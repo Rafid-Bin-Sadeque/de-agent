@@ -106,7 +106,7 @@ def test_agents_and_skills_follow_the_spec():
     assert "tools:" not in agents["executor"].split("---")[1]  # all tools
     skills = {p.parent.name: p.read_text() for p in (ROOT / "skills").glob("*/SKILL.md")}
     assert set(skills) == {"hub-init", "onboard-project", "hub-sync", "pipeline-check", "incident-triage", "plan", "audit",
-                          "backfill", "schema-change", "new-pipeline"}
+                          "backfill", "schema-change", "new-pipeline", "add-source"}
     for name, text in skills.items():
         fm = text.split("---")[1]
         assert f"name: {name}" in fm and "description:" in fm

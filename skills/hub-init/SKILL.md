@@ -11,7 +11,7 @@ The user says "set up de-agent", "create a hub", or `dea` reports "no hub found"
 ## Inputs (ask the human; do not guess)
 - Hub folder (where the markdown hub will live; a new git repo is a good home).
 - Folder that holds the code repos (Airflow, dbt, SQL) to scan, and which is which.
-- Data sources to snapshot: for each, type (postgres, airflow, dbt), host/port/db/user, and HOW the secret is
+- Data sources to snapshot: for each, type (postgres, redshift, airflow, dbt, aws; anything else through a pack: use the `add-source` skill), host/port/db/user, and HOW the secret is
   provided: `env:VAR`, `pgpass`, or `file:/abs/path` (mode 0600). Never ask for the secret value itself.
 - Optional: an ssh host alias if a source is only reachable from a bastion (`exec: ssh:<alias>`).
 

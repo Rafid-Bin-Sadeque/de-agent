@@ -34,6 +34,15 @@ OTHER_DB_CLIENTS = frozenset({
 
 DB_CLIENTS = frozenset(SQL_CLIENTS) | {"bq"} | OTHER_DB_CLIENTS
 
+# cloud / data CLIs whose own SQL (after a `sql` subcommand, or `-e`) `extract.py` reads; the value is the sqlglot dialect
+CLI_SQL_CLIENTS = {"snow": "snowflake", "dbsqlcli": "databricks", "databricks": "databricks"}
+
+# CLIs the CLI write guard (`scripts/cli_guard.py`, `cliclass.py`) classifies as read / write / unknown
+GUARDED_CLIS = frozenset({
+    "aws", "gcloud", "gsutil", "bq", "databricks", "dbsqlcli", "kubectl", "helm", "terraform", "tofu", "pulumi", "az", "snow",
+    "dbt", "airflow", "dagster", "prefect", "kafka-topics", "kafka-configs",
+})
+
 # Python database drivers (import name prefixes): code that imports one is scanned for SQL (pyscan.py)
 PY_DRIVERS = (
     "psycopg", "psycopg2", "psycopg_pool", "sqlalchemy", "pymysql", "MySQLdb", "mysql", "mysql.connector",
@@ -50,6 +59,7 @@ PY_DRIVER_DIALECT = {
 
 _SOURCE_DIALECTS = {"redshift-data": "redshift", "bq": "bigquery", "athena": "athena"}
 _SOURCE_DIALECTS.update(SQL_CLIENTS)
+_SOURCE_DIALECTS.update(CLI_SQL_CLIENTS)
 _SUFFIXES = ("-file", "-heredoc", "-herestring", "-stdin")
 
 

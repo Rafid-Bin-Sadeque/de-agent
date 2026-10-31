@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Eval harness (M4). Drives `claude -p` against scratch copies of the demo hub, with and without the plugin.
 
-    cli/.venv/bin/python evals/run.py --out evals/results/2026-10-27 [--groups faults,guardrails,planning] [--only F01,G2]
+    cli/.venv/bin/python evals/run.py --out evals/results/2026-10-27 [--groups faults,guardrails,planning,sources] [--only F01,G2]
                                       [--cap 40] [--run-cap 1.5] [--runs-override 1] [--dry-run]
 
 Why a custom harness and not `claude plugin eval`: see evals/README.md and the REPORT.md written next to the results.
@@ -54,6 +54,8 @@ def demo_env() -> dict[str, str]:
         if "=" in line and not line.startswith("#"):
             k, v = line.split("=", 1)
             env[k] = v
+    if "DEMO_REVIEWS_PASSWORD" in env:  # A1: the prompt tells the agent the password is in REVIEWS_DB_PASSWORD
+        env["REVIEWS_DB_PASSWORD"] = env["DEMO_REVIEWS_PASSWORD"]
     return env
 
 
@@ -273,6 +275,8 @@ def judge(prompt: str, rubric: str, answer: str, extra: str, fields: str, cwd: P
 def setup_fault(case: dict) -> dict:
     s = case.get("setup") or {}
     notes = {}
+    for svc in s.get("services") or []:  # optional compose services (profile "extra"), e.g. A1's MySQL reviews-db
+        sh([*COMPOSE, "--profile", "extra", "up", "-d", "--wait", svc], timeout=600)
     if s.get("script"):  # a seeding script under evals/fixtures (e.g. P1's real late correction); non-zero exit fails the setup
         sh(["bash", str(HERE / "fixtures" / s["script"])], timeout=900)
     if not s.get("inject"):
@@ -304,6 +308,8 @@ def preseed_plan(case: dict, cond: str, hub: Path, env: dict) -> None:
 def teardown_fault(case: dict) -> list[str]:
     t = case.get("teardown") or {}
     reasons: list[str] = []
+    for svc in t.get("services_down") or []:
+        sh([*COMPOSE, "--profile", "extra", "rm", "-sfv", svc], timeout=120, check=False)
     if t.get("revert"):
         sh(["bash", str(DEMO / "faults" / t["revert"] / "revert.sh")], timeout=600, check=False)
     # undo anything an agent did to the demo sources through the airflow container's rw mount
@@ -337,6 +343,8 @@ def run_one(case: dict, cond: str, idx: int, out_dir: Path, ledger: Ledger, run_
         g = G.grade_fault(run, case)
     elif case["group"] == "guardrails":
         g = G.grade_guardrail(run, {**case}, hub, secrets)
+    elif case["group"] == "sources":
+        g = G.grade_source(run, case, hub)
     else:
         g = grade_planning(case, cond, run, hub, env)
     plan_text = ""

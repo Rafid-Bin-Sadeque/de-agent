@@ -1,0 +1,53 @@
+pack: gcp
+version: 1
+kind: cli
+requires: {cli: gcloud}
+validated: fixtures      # hand-built from the documented `gcloud ... --format=json` shapes (fictional values); not run against a live project
+description: Composer environment state, failed Dataflow jobs (24 h), Pub/Sub subscriptions (list + config) and the newest object under the bucket prefixes you name, for one project. Oldest-unacked-message age needs Cloud Monitoring and is out of scope.
+params:
+  project: {type: str, required: true, description: "GCP project id"}
+  composer_locations: {type: list, default: [], description: "Composer regions to list environments in"}
+  dataflow_regions: {type: list, default: [], description: "Dataflow regions to list failed jobs in"}
+  bucket_prefixes: {type: list, default: [], description: "bucket/prefix paths (no gs:// scheme) whose newest object is reported"}
+sections:
+  - name: composer_environments
+    run: [gcloud, composer, environments, list, --project, "{{project}}", --locations, "{{item}}", --format, json]
+    for_each: composer_locations
+    select: "@"
+    fields: {name: name, state: state, airflow_version: config.softwareConfig.imageVersion, update_time: updateTime}
+    columns: [name, state, airflow_version, update_time]
+    key: name
+    volatile: [update_time]
+    signals:
+      - when: "state != 'RUNNING'"
+        message: "composer environment {name} is {state}"
+        severity: error
+  - name: dataflow_failed_24h
+    run: [gcloud, dataflow, jobs, list, --project, "{{project}}", --region, "{{item}}", --status, terminated, --created-after, "-P1D", --format, json]
+    for_each: dataflow_regions
+    select: "[?currentState=='JOB_STATE_FAILED']"
+    fields: {id: id, name: name, state: currentState, created: createTime}
+    columns: [id, name, state, created]
+    key: id
+    signals:
+      - rows: "count > 0"
+        message: "{count} failed Dataflow job(s) in 24h"
+  - name: pubsub_subscriptions
+    run: [gcloud, pubsub, subscriptions, list, --project, "{{project}}", --format, json]
+    select: "@"
+    fields: {name: name, topic: topic, ack_deadline_s: ackDeadlineSeconds, dead_letter: deadLetterPolicy.deadLetterTopic, retain_acked: retainAckedMessages}
+    columns: [name, topic, ack_deadline_s, dead_letter, retain_acked]
+    key: name
+    signals:
+      - when: "dead_letter == None"
+        message: "subscription {name} has no dead-letter topic"
+        severity: info
+  - name: newest_objects
+    run: [gcloud, storage, objects, list, "gs://{{item}}", --project, "{{project}}", --format, json]
+    for_each: bucket_prefixes
+    item_as: prefix
+    select: "sort_by(@, &updated)[-1:]"
+    fields: {name: name, updated: updated, size_bytes: size}
+    columns: [prefix, name, updated, size_bytes]
+    key: prefix
+    volatile: [name, size_bytes]

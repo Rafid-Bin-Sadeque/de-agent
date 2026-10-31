@@ -1,0 +1,61 @@
+pack: mssql
+version: 1
+kind: sql
+dialect: tsql
+requires: {extra: mssql}
+validated: fixtures      # hand-built from the documented DMV / msdb shapes (fictional values); not run against a live server
+description: Blocking chains, long requests, SQL Agent job failures (msdb) and the largest tables of one SQL Server database. Needs VIEW SERVER STATE and SQLAgentReaderRole. The connection asks for a read-intent route (ApplicationIntent=ReadOnly).
+params: {}
+sections:
+  - name: blocking_chains
+    sql: |
+      select r.session_id as blocked_session, r.blocking_session_id as blocker_session,
+             r.wait_type, r.wait_time / 1000 as wait_s, db_name(r.database_id) as database_name
+      from sys.dm_exec_requests r
+      where r.blocking_session_id <> 0
+      order by r.wait_time desc, r.session_id
+    key: [blocked_session, blocker_session]
+    volatile: [wait_type, wait_s]
+    signals:
+      - rows: "count > 0"
+        message: "{count} blocked request(s)"
+      - when: "wait_s > 300"
+        message: "session {blocked_session} blocked by {blocker_session} for {wait_s} s"
+        severity: error
+  - name: long_requests
+    sql: |
+      select top 25 r.session_id, r.status, r.command, r.total_elapsed_time / 1000 as elapsed_s,
+             db_name(r.database_id) as database_name, left(t.text, 200) as statement
+      from sys.dm_exec_requests r
+      cross apply sys.dm_exec_sql_text(r.sql_handle) t
+      where r.session_id <> @@spid and r.total_elapsed_time > 300000
+      order by r.total_elapsed_time desc, r.session_id
+    key: session_id
+    volatile: [status, command, elapsed_s, statement]
+    signals:
+      - rows: "count > 0"
+        message: "{count} request(s) running for more than 5 min"
+  - name: agent_job_failures_24h
+    sql: |
+      select top 50 j.name as job_name, h.run_status, h.message,
+             msdb.dbo.agent_datetime(h.run_date, h.run_time) as run_at
+      from msdb.dbo.sysjobhistory h
+      join msdb.dbo.sysjobs j on j.job_id = h.job_id
+      where h.step_id = 0 and h.run_status = 0
+        and msdb.dbo.agent_datetime(h.run_date, h.run_time) > dateadd(hour, -24, getdate())
+      order by run_at desc
+    key: [job_name, run_at]
+    signals:
+      - rows: "count > 0"
+        message: "{count} SQL Agent job failure(s) in 24h"
+  - name: top_tables
+    sql: |
+      select top 20 s.name as schema_name, t.name as table_name,
+             sum(ps.reserved_page_count) * 8 * 1024 as total_bytes, sum(ps.row_count) as approx_rows
+      from sys.dm_db_partition_stats ps
+      join sys.tables t on t.object_id = ps.object_id
+      join sys.schemas s on s.schema_id = t.schema_id
+      where ps.index_id in (0, 1)
+      group by s.name, t.name
+      order by total_bytes desc, 1, 2
+    key: [schema_name, table_name]

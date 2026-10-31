@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "de-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "Ground-truth context, guardrails and workflows for data engineering with Claude Code"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 authors = [{ name = "de-agent maintainers" }]
-keywords = ["data-engineering", "claude-code", "airflow", "dbt", "redshift", "postgres", "guardrails"]
+keywords = ["data-engineering", "claude-code", "airflow", "dbt", "redshift", "postgres", "snowflake", "bigquery", "databricks", "guardrails"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
@@ -26,12 +26,19 @@ classifiers = [
   "Topic :: Database",
   "Topic :: Software Development :: Quality Assurance",
 ]
-dependencies = ["sqlglot>=30,<31", "pydantic>=2", "pyyaml", "typer"]
+dependencies = ["sqlglot>=30,<31", "pydantic>=2", "pyyaml", "typer", "jmespath>=1.0"]
 
 [project.optional-dependencies]
 aws = ["boto3"]
-pg = ["psycopg[binary]>=3.1"]
-dev = ["pytest", "pytest-cov", "ruff", "boto3", "moto[all]", "psycopg[binary]>=3.1"]
+pg = ["psycopg[binary]>=3.1", "sqlalchemy>=2"]
+mysql = ["pymysql", "sqlalchemy>=2"]
+snowflake = ["snowflake-sqlalchemy", "snowflake-connector-python", "sqlalchemy>=2"]
+bigquery = ["sqlalchemy-bigquery", "sqlalchemy>=2"]
+databricks = ["databricks-sql-connector", "sqlalchemy>=2"]
+mssql = ["pyodbc", "sqlalchemy>=2"]
+terraform = ["python-hcl2>=4"]
+all = ["de-agent[aws,pg,mysql,snowflake,bigquery,databricks,mssql,terraform]"]
+dev = ["pytest", "pytest-cov", "ruff", "boto3", "moto[all]", "psycopg[binary]>=3.1", "sqlalchemy>=2", "pymysql", "python-hcl2>=4"]
 
 [project.urls]
 Homepage = "https://github.com/Rafid-Bin-Sadeque/de-agent"
