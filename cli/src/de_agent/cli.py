@@ -645,6 +645,14 @@ def _register_packs() -> None:
 _register_packs()
 
 
+def _version(value: bool) -> None:
+    if value:
+        from de_agent import __version__
+        typer.echo(f"de-agent {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
-def main() -> None:
+def main(version: bool = typer.Option(False, "--version", "-V", callback=_version, is_eager=True,
+                                      help="Print the de-agent version and exit.")) -> None:
     """de-agent CLI."""

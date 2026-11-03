@@ -129,7 +129,8 @@ def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     windowed = set(getattr(collector, "windowed_sections", set()))  # sliding windows: rows age out, not "removed"
     ranking = set(getattr(collector, "ranking_sections", set()))  # top-N lists: entering/leaving is not news
     od, nd = old.get("data") or {}, new.get("data") or {}
-    out: dict[str, Any] = {"signals_new": [], "signals_cleared": [], "signals_recovered": [], "scalars": [], "lists": {}}
+    out: dict[str, Any] = {"signals_new": [], "signals_cleared": [], "signals_recovered": [], "signals_reopened": [], "scalars": [],
+                           "lists": {}}
 
     old_sig, new_sig = signals_for(old), signals_for(new)
     old_norm, new_norm = {_norm_signal(s) for s in old_sig}, {_norm_signal(s) for s in new_sig}
@@ -143,6 +144,15 @@ def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
             out["signals_cleared"] = [c for c in out["signals_cleared"] if _norm_signal(c) != base]
             if base not in {_norm_signal(x.split(RECOVERED_MARK)[0].rstrip()) for x in old_sig if RECOVERED_MARK in x}:
                 out["signals_recovered"].append(s)
+    # and back: a recovered signal whose latest run is no longer a success (running again, or failed again) is one
+    # ACTIVE AGAIN line, not NEW + cleared for the same failure
+    for s in list(out["signals_new"]):
+        was = [c for c in out["signals_cleared"]
+               if RECOVERED_MARK in c and _norm_signal(c.split(RECOVERED_MARK)[0].rstrip()) == _norm_signal(s)]
+        if was:
+            out["signals_new"].remove(s)
+            out["signals_cleared"] = [c for c in out["signals_cleared"] if c not in was]
+            out["signals_reopened"].append(s)
     if new.get("type") == "dbt":
         _dbt_recovery(od, nd, out)
 
@@ -192,7 +202,8 @@ def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
 
 
 def _empty(d: dict[str, Any]) -> bool:
-    return not (d["signals_new"] or d["signals_cleared"] or d["signals_recovered"] or d["scalars"] or d["lists"])
+    return not (d["signals_new"] or d["signals_cleared"] or d["signals_recovered"] or d.get("signals_reopened") or d["scalars"]
+                or d["lists"])
 
 
 def _usable(hub: Path, sid: str, source: str) -> dict[str, Any] | None:
@@ -263,6 +274,8 @@ def render_markdown(report: dict[str, Any]) -> str:
             continue
         for s in d["signals_new"]:
             lines.append(f"- NEW signal: {s}")
+        for s in d.get("signals_reopened", []):
+            lines.append(f"- ACTIVE AGAIN signal: {s} (was recovered; the latest run is not a success)")
         for s in d["signals_recovered"]:
             lines.append(f"- RECOVERED signal: {s}")
         for s in d["signals_cleared"]:

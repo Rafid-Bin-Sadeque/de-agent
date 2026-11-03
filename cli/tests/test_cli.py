@@ -272,3 +272,12 @@ def test_doctor_shows_vendored_sqlglot_hint_instead_of_skipping(example_hub, mon
     monkeypatch.setattr(climod, "_plugin_root", lambda: None)
     r = runner.invoke(app, ["doctor"])
     assert "vendored sqlglot" in r.output and "set CLAUDE_PLUGIN_ROOT=<your clone of the plugin> to check" in r.output
+
+
+def test_version_flag():
+    from de_agent import __version__
+    from de_agent.cli import app
+    from typer.testing import CliRunner
+    for flag in ("--version", "-V"):
+        r = CliRunner().invoke(app, [flag])
+        assert r.exit_code == 0 and r.output.strip() == f"de-agent {__version__}"

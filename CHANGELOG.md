@@ -5,6 +5,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-03
+
+### Added
+- `dea --version` (`-V`).
+
+### Fixed
+- `dea diff`: a recovered failure signal whose DAG started a new run (or failed again) was printed twice, as NEW and as cleared. It is now
+  one `ACTIVE AGAIN` line.
+
 ## [0.2.1] - 2026-11-03
 
 ### Added
