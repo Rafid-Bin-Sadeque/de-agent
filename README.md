@@ -3,7 +3,7 @@
 For data engineers using Claude Code on Postgres, Redshift, Airflow, dbt and AWS.
 
 Ground-truth context, enforced guardrails and workflows for data engineering with [Claude Code](https://claude.com/claude-code).
-Status: v0.2.2. Apache-2.0.
+Status: v0.2.3. Apache-2.0.
 
 > **New to this?** Read [docs/START_HERE.md](docs/START_HERE.md) first. It explains everything in plain words, with pictures,
 > in about 10 minutes.
@@ -71,6 +71,8 @@ Details: [docs/architecture.md](docs/architecture.md).
 ## Prerequisites and install
 
 **Prerequisites:** Python 3.10+, Docker (for the demo), the `claude` CLI, and `psql`. The plugin hooks run under the system `python3` (3.9+).
+The demo needs about 3 GB of RAM free for Docker.
+Behind a corporate TLS-inspecting proxy, put its root CA in `demo/extra-ca/` before the first demo build (see [demo/README.md](demo/README.md#proxy)).
 
 The plugin (skills, agents, hooks) and the CLI (`dea`) install separately; both are needed.
 
@@ -93,8 +95,9 @@ python3 the hooks will run.
 Needs the prerequisites and install above. Everything is the fictional Acme Shop stack; the "database" is a local container.
 
 ```bash
-make demo-up                                   # Acme Shop: source DB, Airflow, warehouse, dbt (writes demo/.env)
+make demo                                      # Acme Shop: source DB, Airflow, warehouse, dbt + first pipeline run (writes demo/.env)
 make fault-inject N=01                         # an upstream team renames orders.customer_id -> cust_id
+make dag-trigger D=extract_shop                # run the pipeline now (it otherwise runs hourly) so the failure shows up
 cd demo && claude --plugin-dir ..              # your terminal; the hub is demo/
 ```
 
@@ -122,7 +125,7 @@ latest, with per-run tables and notes on every miss) and [2026-10-27](evals/resu
 |---|---|---|---|---|
 | Fault diagnosis (6 injected faults) | F01-F06 | n = 18 | 18 of 18 | 15 of 18 |
 | Guardrails (4 pressure tests) | G1-G4 | n = 12 plugin, 4 baseline | 12 of 12 held, 0 violations | 1 of 4 held, 3 violations |
-| Planning (2 plan-writing cases) | P1-P2 | n = 4 | 4 of 4 | 0 of 4 |
+| Planning (2 plan-writing cases) | P1-P2 | n = 4 | 4 of 4 (2 of 4 before the P1 rubric change) | 0 of 4 (graded by an LLM judge) |
 
 Diagnosis is close (18 of 18 with the plugin against 15 of 18 without); the larger difference is safety: under pressure the baseline broke a
 guardrail in 3 of 4 runs and the plugin held in 12 of 12. Small n, one model, one fictional stack: how to read these numbers, with every
@@ -148,14 +151,14 @@ Or open Claude Code in an empty folder and say "set up de-agent" (the `hub-init`
 
 Three tiers.
 
-**1. Deep collectors** (hand-written, richest signals): Postgres 12-17, Redshift, Airflow 2.x and 3.x, dbt, AWS.
+**1. Deep collectors** (hand-written, richest signals): Postgres 12-17, Redshift, Airflow 2.x and 3.x, dbt 1.8+, AWS.
 
 | system | what it reads | notes |
 |---|---|---|
 | Postgres 12-17 | connections, locks, bloat, vacuum and xid age, slots, settings, largest tables | collector, `dea query`, and plan targets (`writable: true`) |
 | Redshift | workload by user and query, spill, concurrency, table health, locks, load errors | PG wire or Data API, provisioned or serverless; `dea query` |
-| Airflow 2.x and 3.x | DAG runs, failures with log tails, import errors, paused DAGs, datasets | REST API |
-| dbt 1.6-1.9 | failing models and tests, slowest nodes, freshness, exposures | reads `manifest.json`, `run_results.json`, `sources.json` |
+| Airflow 2.x and 3.x | DAG runs, failures with log tails, import errors, paused DAGs, datasets | REST API; 2.10 runs live in the demo, 3.0 is tested on recorded API responses |
+| dbt 1.8+ | failing models and tests, slowest nodes, freshness, exposures | reads `manifest.json` (v12), `run_results.json`, `sources.json` |
 | AWS | DMS tasks and CDC latency, Glue jobs, S3 prefixes, Athena, Firehose, CloudWatch alarms | `Describe*`/`List*`/`Get*` only; `[aws]` extra; [IAM policy](docs/aws-iam-readonly.json) |
 
 **2. Packs** (a YAML file over SQL, a CLI or an HTTP API, read-only in code; [docs/packs.md](docs/packs.md)). `validated: live` means it was run against a real

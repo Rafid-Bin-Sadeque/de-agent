@@ -14,7 +14,7 @@ Think of an AI assistant (Claude) as a smart new teammate on your data team.
 **de-agent fixes both:**
 
 1. It gives Claude **eyes**: a set of read-only notes about your real systems and code, refreshed whenever you ask.
-2. It gives Claude **rules that can't be talked around**: it physically blocks risky actions unless a human signs off.
+2. It gives Claude **rules enforced in code**: it blocks risky actions unless a human signs off (they stop accidents and casual bypass; a read-only login is still the real wall).
 3. It gives Claude **good habits**: step-by-step playbooks for common data-engineering jobs (debugging a failure, backfilling, changing a column).
 
 ```mermaid
@@ -49,7 +49,7 @@ Anything that **changes** something always goes through a plan that **you** appr
 
 ## How a change gets made safely
 
-This is the most important flow. Claude can investigate freely, but it can never change your systems on its own.
+This is the most important flow. Claude can investigate freely, but through its tools it cannot change your systems without a plan you signed.
 
 ```mermaid
 sequenceDiagram
@@ -102,9 +102,12 @@ running before every action, not instructions Claude could choose to ignore. Ful
 | **plan** | a file listing exactly what will change, how to check it, and how to undo it |
 | **approve / apply** | you sign the plan (`dea approve`), then the executor runs it (`dea apply`) |
 
-## Try it in 10 minutes (no real systems needed)
+## Try it on a demo (no real systems needed)
 
 The repo includes a pretend online shop ("Acme Shop") that runs on your laptop in Docker, with problems you can switch on.
+
+**Prerequisites:** Docker with about 3 GB of RAM free, `make`, Python 3.10+ with `uv` or `pipx`, and Claude Code. Behind a corporate
+TLS-inspecting proxy, put the proxy's root CA in `demo/extra-ca/` before the first build (see [demo/README.md](../demo/README.md#proxy)).
 
 ```bash
 # 1. install (once)
@@ -112,8 +115,9 @@ uv tool install 'de-agent[pg,aws]'      # the dea tool
 # in Claude Code:  /plugin marketplace add Rafid-Bin-Sadeque/de-agent   then   /plugin install de-agent@de-agent
 
 # 2. start the pretend shop and break something
-make demo-up
+make demo                                 # build + start + first pipeline run (a few minutes on first build)
 make fault-inject N=01                    # someone renamed a column the pipeline needs
+make dag-trigger D=extract_shop           # run the pipeline now (it otherwise runs hourly) so the failure shows up
 
 # 3. ask Claude
 cd demo && claude --plugin-dir ..
@@ -122,6 +126,9 @@ cd demo && claude --plugin-dir ..
 
 There are six faults to try (`N=01` … `06`): a renamed column, a paused pipeline, a bloated table, a missing index, a failing data test,
 and a query stuck behind a lock. Each one's expected answer is in `demo/faults/NN_*/EXPECTED.md`, so you can check Claude's work.
+
+- `make demo-reset` gives a clean slate (all checkouts of this repo share one compose project).
+- `dea scan` rewrites only the generated header block in `projects/*.md`, so git shows those files as modified. That is expected.
 
 ## Works with your code
 

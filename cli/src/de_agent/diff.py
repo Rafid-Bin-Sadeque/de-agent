@@ -96,6 +96,11 @@ def _norm_signal(s: str) -> str:
     return re.sub(r"\d+(\.\d+)?", "#", s)
 
 
+def _first_int(s: str) -> int:
+    m = re.search(r"\d+", s)
+    return int(m.group()) if m else 0
+
+
 def _dbt_recovery(od: dict[str, Any], nd: dict[str, Any], out: dict[str, Any]) -> None:
     """Failing nodes/tests of the old snapshot that a LATER dbt run executed successfully are recovered, not just cleared."""
     old_fail = {str(n["unique_id"]) for n in od.get("failing_nodes") or []}
@@ -144,15 +149,16 @@ def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
             out["signals_cleared"] = [c for c in out["signals_cleared"] if _norm_signal(c) != base]
             if base not in {_norm_signal(x.split(RECOVERED_MARK)[0].rstrip()) for x in old_sig if RECOVERED_MARK in x}:
                 out["signals_recovered"].append(s)
-    # and back: a recovered signal whose latest run is no longer a success (running again, or failed again) is one
-    # ACTIVE AGAIN line, not NEW + cleared for the same failure
+    # and back: a recovered signal whose latest run is no longer a success is one line, not NEW + cleared. Same failure
+    # count (a new run is in progress): ACTIVE AGAIN. Higher count (it failed again): a real NEW signal.
     for s in list(out["signals_new"]):
         was = [c for c in out["signals_cleared"]
                if RECOVERED_MARK in c and _norm_signal(c.split(RECOVERED_MARK)[0].rstrip()) == _norm_signal(s)]
         if was:
-            out["signals_new"].remove(s)
             out["signals_cleared"] = [c for c in out["signals_cleared"] if c not in was]
-            out["signals_reopened"].append(s)
+            if _first_int(s) <= _first_int(was[0]):
+                out["signals_new"].remove(s)
+                out["signals_reopened"].append(s)
     if new.get("type") == "dbt":
         _dbt_recovery(od, nd, out)
 

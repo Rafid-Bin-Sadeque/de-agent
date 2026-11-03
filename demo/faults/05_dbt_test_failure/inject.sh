@@ -8,3 +8,4 @@ SELECT * FROM raw.order_items WHERE id BETWEEN 1 AND 50
   AND (SELECT count(*) FROM raw.order_items WHERE id = 1) = 1;
 SQL
 say "05 injected: 50 duplicate order_items rows (ids 1..50) in raw.order_items"
+say "next: make dag-trigger D=dbt_build, wait for the run to fail, then: cd demo && dea snapshot && dea diff"

@@ -80,7 +80,7 @@ else
 fi
 echo "== 2. fill placeholders: owner=$OWNER repo=$REPO version=$VERSION"
 git switch -q -c "$TMP_BRANCH" main
-FILES="$(git ls-files README.md cli/pyproject.toml cli/README.md '.claude-plugin/*.json' 'docs/*' 'skills/*' 'agents/*' | tr '\n' ' ')"
+FILES="$(git ls-files README.md SECURITY.md CODE_OF_CONDUCT.md CONTRIBUTING.md cli/pyproject.toml cli/README.md '.claude-plugin/*.json' 'docs/*' 'skills/*' 'agents/*' | tr '\n' ' ')"
 # shellcheck disable=SC2086
 [ -z "$FILES" ] || perl -pi -e "s{OWNER/groundtruth}{$OWNER/$REPO}g; s{OWNER/de-agent}{$OWNER/$REPO}g; s{github\.com/OWNER/}{github.com/$OWNER/}g; s{github\.com:OWNER/}{github.com:$OWNER/}g" $FILES
 git add -A

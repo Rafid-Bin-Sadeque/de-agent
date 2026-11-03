@@ -7,3 +7,4 @@ if [ "$n" != "0" ]; then say "06 already injected"; exit 0; fi
   '(echo "BEGIN; LOCK TABLE analytics.fct_orders IN ACCESS EXCLUSIVE MODE;"; sleep 3600) | psql -X -q -U etl -d warehouse'
 sleep 2
 say "06 injected: dea_fault_06 holds ACCESS EXCLUSIVE on analytics.fct_orders (idle in transaction)"
+say "next: make dag-trigger D=dbt_build (it will hang on the lock), wait about 30 s, then: cd demo && dea snapshot && dea diff"

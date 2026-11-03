@@ -8,3 +8,4 @@ for i in 1 2; do
   say "update pass $i done"
 done
 say "03 injected: raw.events has ~1.2M dead tuples, autovacuum disabled, warehouse_maintenance paused"
+say "next: no trigger needed. Run: cd demo && dea snapshot && dea diff"

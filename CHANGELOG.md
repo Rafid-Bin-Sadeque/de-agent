@@ -5,6 +5,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-03
+
+### Fixed
+- `dea diff`: a recovered signal whose DAG failed again (higher failure count) is a NEW signal again; ACTIVE AGAIN is kept for
+  a new run in progress with the same count. 0.2.2 reported both as ACTIVE AGAIN.
+- CI: the doctor test assumed `kubectl` is absent; the demo e2e test now creates `demo/.env`.
+- Demo onboarding: `make demo` (start plus first pipeline run), `make demo-warm`, `make dag-trigger D=`, a next-step hint printed by every
+  fault's `inject.sh`, and the Makefile `DEA` default falls back to `dea` on PATH when the repo venv is absent.
+
+### Changed
+- Wording: eval report regrade note, README Airflow/dbt version claims, START_HERE safety wording, SAFETY "In short" section,
+  SECURITY and Code of Conduct contact.
+
 ## [0.2.2] - 2026-11-03
 
 ### Added

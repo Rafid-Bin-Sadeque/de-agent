@@ -9,6 +9,7 @@ DEA_DEMO_DOWN=1.
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -34,6 +35,8 @@ COMPOSE = ["docker", "compose", "-f", str(DEMO / "docker-compose.yml"), "--env-f
 def _env():
     env = dict(os.environ)
     env["HOME"] = REAL_HOME
+    if not (DEMO / ".env").exists():  # a fresh checkout (CI): same as the Makefile's demo/.env target
+        shutil.copy(DEMO / ".env.example", DEMO / ".env")
     for line in (DEMO / ".env").read_text().splitlines():
         if "=" in line and not line.startswith("#"):
             k, v = line.split("=", 1)

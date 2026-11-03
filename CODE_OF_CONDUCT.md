@@ -21,8 +21,8 @@ in a professional setting.
 ## Enforcement
 
 Maintainers are responsible for clarifying and enforcing these standards and may remove, edit or reject comments, commits, code, issues and
-other contributions that do not follow them. Report unacceptable behaviour privately to the maintainers (GitHub private security advisory
-on this repository, or the maintainers' email listed on their profiles). Reports are reviewed promptly and kept confidential. The
+other contributions that do not follow them. Report unacceptable behaviour privately to the maintainers through GitHub's private reporting form
+(https://github.com/Rafid-Bin-Sadeque/de-agent/security/advisories/new; say it is a conduct report). Reports are reviewed promptly and kept confidential. The
 Contributor Covenant's enforcement guidelines (correction, warning, temporary ban, permanent ban) apply.
 
 ## Attribution

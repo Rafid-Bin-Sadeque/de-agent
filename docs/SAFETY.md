@@ -1,5 +1,13 @@
 # Safety model
 
+## In short
+
+- The real wall is the read-only database login: with it, the agent's reads cannot change anything.
+- Hooks add defence in depth: they deny writes, secret reads, self-approval, weakening tests and editing the guards themselves.
+- A change happens only through a plan that a human signs in their own terminal (`dea approve`); the agent cannot sign.
+- This stops accidents and casual bypass. It is not a sandbox: a determined attacker with shell access is out of scope.
+- The detailed layer-by-layer table is below.
+
 de-agent lets an agent look at live data systems and, only through a reviewed plan, change them. This page lists the
 guard layers, what each one stops, and what none of them can stop.
 

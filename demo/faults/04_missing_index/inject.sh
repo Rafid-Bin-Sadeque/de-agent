@@ -12,3 +12,4 @@ WHERE NOT EXISTS (SELECT 1 FROM raw.orders WHERE id = 10000001);
 ANALYZE raw.orders;
 SQL
 say "04 injected: raw.orders_updated_at_idx dropped, +500k old rows in raw.orders (ids > 10,000,000)"
+say "next: make dag-trigger D=extract_shop (it otherwise runs hourly), then: cd demo && dea snapshot && dea diff"

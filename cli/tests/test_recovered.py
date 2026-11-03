@@ -87,6 +87,19 @@ def test_recovered_then_running_again_is_one_active_again_line():
     assert "- ACTIVE AGAIN signal: dag a" in md and "NEW signal" not in md and "cleared signal" not in md
 
 
+def test_recovered_then_failed_again_is_a_new_signal():
+    fixed = _data([_run("a", "failed", "2026-10-20T05:00:00Z", "2026-10-20T05:05:00Z"),
+                   _run("a", "success", "2026-10-20T07:00:00Z", "2026-10-20T07:03:00Z")],
+                  [_fail("a", "2026-10-20T05:00:00Z")])
+    again = _data([_run("a", "failed", "2026-10-20T05:00:00Z", "2026-10-20T05:05:00Z"),
+                   _run("a", "success", "2026-10-20T07:00:00Z", "2026-10-20T07:03:00Z"),
+                   _run("a", "failed", "2026-10-20T08:00:00Z", "2026-10-20T08:02:00Z")],
+                  [_fail("a", "2026-10-20T05:00:00Z"), _fail("a", "2026-10-20T08:00:00Z")])
+    d = diff_results(_res(fixed), _res(again))
+    assert len(d["signals_new"]) == 1 and d["signals_new"][0].startswith("dag a: 2 failed run(s) in 24h")
+    assert d["signals_cleared"] == [] and d["signals_reopened"] == []
+
+
 def test_diff_markdown_line(tmp_path):
     from de_agent.diff import render_markdown
 

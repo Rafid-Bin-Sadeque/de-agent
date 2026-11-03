@@ -3,3 +3,4 @@
 . "$(dirname "$0")/../_lib.sh"
 af dags pause extract_shop 2>&1 | tail -1
 say "02 injected: extract_shop is paused"
+say "next: make dag-trigger D=extract_shop (a paused DAG's manual run just sits queued), then: cd demo && dea snapshot && dea diff (look for is_paused)"

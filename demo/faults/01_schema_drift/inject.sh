@@ -12,3 +12,4 @@ DO $$ BEGIN
 END $$;
 SQL
 say "01 injected: source orders.customer_id is now cust_id; extract_shop's orders task will fail"
+say "next: make dag-trigger D=extract_shop (it otherwise runs hourly), then: cd demo && dea snapshot && dea diff"

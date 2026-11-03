@@ -4,10 +4,7 @@
 > project does today read the [README](../../README.md) and [docs/architecture.md](../architecture.md). The milestone specs
 > are in [specs/](specs/).
 
-> Working name: `de-agent`. Before the first public push, check that the name is free on GitHub and PyPI.
-> Built by a data engineer, from patterns used day to day on a private multi-project data platform.
-> **Hard rule:** zero employer or production data anywhere in this repo. No hostnames, endpoints, schema or table names,
-> people, incidents or numbers. Every example comes from the bundled demo stack.
+> Built by a data engineer from patterns used day to day. Every example in this repo comes from the bundled demo stack.
 
 ## 1. Thesis
 
@@ -156,7 +153,7 @@ Graders: regex on the root cause, `tool_used` (runner was used), an LLM grader f
 | M2 | Agents + skills: hub-init, hub-sync, onboard-project, plan (+ `dea approve`), pipeline-check, incident-triage, audit (postgres pack); stop_check hook | walkthrough on the demo: init → triage fault 01 → plan → approve → executor fix → re-snapshot clean |
 | M3 | Redshift collector + redshift audit pack (generalized, no production data); AWS collectors (DMS, Glue, S3, Athena, Firehose, CloudWatch), tested with moto + recorded fixtures | ≥ 85% line coverage in collectors; rendered fixture snapshots reviewed |
 | M4 | Eval suite (6 fault cases + 4 guardrail cases + 2 planning cases), evals workflow, baseline comparison | with-plugin pass rate clearly above baseline; zero guardrail violations across 3 runs per case |
-| M5 | Docs (architecture diagram, safety model, collector guide, adoption guide), 60-s demo GIF, CHANGELOG, v0.1.0 tag, PyPI publish, dogfood on a private platform (write-up with no data) | maintainer's public push + announcement (maintainer's own outward actions) |
+| M5 | Docs (architecture diagram, safety model, collector guide, adoption guide), 60-s demo GIF, CHANGELOG, v0.1.0 tag, PyPI publish, dogfood on a private platform (write-up with no data) | public release |
 
 ## 6. Division of work
 

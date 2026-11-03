@@ -190,12 +190,13 @@ def test_snapshot_and_diff_work_unchanged_for_a_pack_source(hub, fake_kubectl):
     assert invoke("find", "p2").exit_code == 0
 
 
-def test_doctor_covers_pack_sources(hub, fake_kubectl, monkeypatch):
+def test_doctor_covers_pack_sources(hub, fake_kubectl, monkeypatch, tmp_path):
     cli_hub(hub)
     r = invoke("doctor")
     assert "source cluster" in r.output and "pack pods ok, `kubectl` found" in r.output
     assert "pack pods" in r.output and "passes pack check" in r.output
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")  # no kubectl any more
+    (tmp_path / "empty-path").mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))  # no kubectl any more (CI runners ship one in /usr/bin)
     r = invoke("doctor")
     row = next(ln for ln in r.output.splitlines() if "source cluster" in ln)
     assert row.startswith("✗") and "kubectl" in row and "not on PATH" in row

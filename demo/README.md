@@ -11,9 +11,12 @@ source-db (postgres:16.4, OLTP shop) --app-sim trickle--> extract_shop (Airflow 
 
 | command | what it does |
 |---|---|
+| `make demo` | the one command for newcomers: `demo-up` then `demo-warm` (a few minutes on first build) |
+| `make demo-warm` | triggers `extract_shop`, waits (max 10 min) for the first successful `dbt_build`, which writes `dbt/acme/target/{manifest,run_results,sources}.json` |
+| `make dag-trigger D=extract_shop` | runs an Airflow DAG now (`extract_shop` otherwise runs hourly) |
 | `make demo-up` | build + start (about 1 minute once images are cached); copies `.env.example` to `.env` |
 | `make demo-snapshot` | `dea snapshot` against warehouse, source, airflow and dbt (`demo/de-agent.yaml`) |
-| `cd demo && DEA_HUB=$PWD ../cli/.venv/bin/dea scan` | static scan of `airflow/` and `dbt/acme` (needs `dbt/acme/target/manifest.json`, written by `dbt parse`/`build` inside the airflow container): `catalog/` (gitignored), generated header in `projects/*.md`; then `dea edges analytics.fct_orders`, `dea impact raw.orders` |
+| `cd demo && DEA_HUB=$PWD ../cli/.venv/bin/dea scan` | static scan of `airflow/` and `dbt/acme` (needs `dbt/acme/target/manifest.json`, written by the first `dbt_build` run; `make demo-warm` triggers it): `catalog/` (gitignored), generated header in `projects/*.md`; then `dea edges analytics.fct_orders`, `dea impact raw.orders` |
 | `make fault-inject N=01` / `make fault-revert N=01` | seeded faults 01-06 (see `faults/NN_*/EXPECTED.md`) |
 | `DEA_DEMO=1 pytest -m walkthrough -s cli/tests/test_walkthrough.py` | the scripted `claude -p` flow on fault 01 (triage, plan, human approve via pty, executor apply, re-snapshot); writes `faults/01_schema_drift/WALKTHROUGH.md` |
 | `docker compose --profile extra up -d --wait reviews-db` | optional MySQL 8.4 `reviews-db` (port 3307, read-only user `monitor`, 50 fictional reviews) for the add-source eval A1; never started by `make demo-up` |
@@ -23,8 +26,13 @@ source-db (postgres:16.4, OLTP shop) --app-sim trickle--> extract_shop (Airflow 
 Ports (override in `demo/.env`): source 5440, warehouse 5441, Airflow 8085 (not 8080, which is often taken), S3 8333.
 Credentials in `.env.example` are demo-only. Airflow users: `agent_ro` (Viewer, used by the collector) and `admin`.
 
+<a id="proxy"></a>
 Behind a TLS-inspecting proxy, `pip` inside the image build fails certificate verification: drop the proxy's root CA as
 `demo/extra-ca/<name>.pem` (gitignored) and rebuild; the Dockerfiles add it to the pip trust bundle.
+
+A snapshot taken before the first `dbt_build` run shows `dbt: partial` (no `target/` yet); that is expected, run `make demo-warm`.
+
+`faults/NN_*/EXPECTED.md` is the answer key for each fault, and `dea find` indexes it too, so searching can spoil the answer.
 
 `faults/NN_*/OBSERVED.md` is written by the e2e from real runs (signal seen, which diff line, seconds taken).
 `tools/record_fixtures.py` re-records the Airflow/dbt test fixtures from a running stack.
