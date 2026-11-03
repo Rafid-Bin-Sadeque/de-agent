@@ -3,7 +3,7 @@
 For data engineers using Claude Code on Postgres, Redshift, Airflow, dbt and AWS.
 
 Ground-truth context, enforced guardrails and workflows for data engineering with [Claude Code](https://claude.com/claude-code).
-Status: v0.2.3. Apache-2.0.
+Status: v0.2.4. Apache-2.0.
 
 > **New to this?** Read [docs/START_HERE.md](docs/START_HERE.md) first. It explains everything in plain words, with pictures,
 > in about 10 minutes.

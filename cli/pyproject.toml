@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "de-agent"
-version = "0.2.3"
+version = "0.2.4"
 description = "Ground-truth context, guardrails and workflows for data engineering with Claude Code"
 readme = "README.md"
 license = "Apache-2.0"
@@ -63,5 +63,5 @@ markers = [
   "integration: needs docker (postgres:16); skipped when unavailable",
   "demo: end-to-end against the demo stack (set DEA_DEMO=1)",
   "walkthrough: scripted claude -p flow on demo fault 01 (needs DEA_DEMO=1 and the claude CLI; run locally, not in CI)",
-  "perf: 1,000-DAG synthetic scan timings; excluded by default, run with -m perf",
+  "perf: timing budgets (1,000-DAG scan, 5,000-page find index); excluded by default, run with -m perf",
 ]

@@ -5,6 +5,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-03
+
+### Fixed
+- CI: the 5,000-page `dea find` timing test is a `perf` test (run nightly with the scan benchmark), so a slow shared runner no
+  longer fails a push. The nightly job runs every `perf` test.
+
 ## [0.2.3] - 2026-11-03
 
 ### Fixed

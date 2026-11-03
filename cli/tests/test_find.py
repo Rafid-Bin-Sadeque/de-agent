@@ -108,6 +108,7 @@ def test_query_terms():
     assert query_terms("a-b/c:d") == ["a", "b", "c", "d"]
 
 
+@pytest.mark.perf  # timing budgets: run nightly (-m perf), not on every push where shared runners are noisy
 def test_performance_5k_pages(tmp_path):
     for i in range(5000):
         d = tmp_path / ("projects" if i % 2 else "platform")

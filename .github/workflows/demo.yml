@@ -15,8 +15,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e 'cli[dev]'
-      - name: scan perf (1,000-DAG synthetic repo)
-        run: pytest -m perf -s cli/tests/test_scan_perf.py
+      - name: perf budgets (1,000-DAG scan, 5,000-page find index)
+        run: pytest -m perf -s cli/tests
       - name: demo e2e (6 seeded faults)
         env:
           DEA_DEMO: "1"
