@@ -39,7 +39,9 @@ The system has SQL, a command-line client or an HTTP API. A *pack* (a small YAML
 
 ## Output
 - The pack used or created (name, kind, `validated:` level), the source block added, `dea pack check` and `dea pack test` results,
-  and anything the human still has to do (export a secret, install an extra, grant a read-only role).
+  and anything the human still has to do (export a secret, install an extra, grant a read-only role: point to the matching block in
+  `docs/read-only-access.md` in the de-agent plugin folder, online at
+  https://github.com/Rafid-Bin-Sadeque/de-agent/blob/main/docs/read-only-access.md).
 
 ## Never
 - Never put a write statement or a mutating verb in a pack (`insert`, `delete`, `create`, `kubectl delete`, `run-now`, a POST mutation).

@@ -13,6 +13,8 @@ The user says "set up de-agent", "create a hub", or `dea` reports "no hub found"
 - Folder that holds the code repos (Airflow, dbt, SQL) to scan, and which is which.
 - Data sources to snapshot: for each, type (postgres, redshift, airflow, dbt, aws; anything else through a pack: use the `add-source` skill), host/port/db/user, and HOW the secret is
   provided: `env:VAR`, `pgpass`, or `file:/abs/path` (mode 0600). Never ask for the secret value itself.
+- Whether each source has a read-only login yet. If not, show the human the matching block from `docs/read-only-access.md`
+  (in the de-agent plugin folder; online at https://github.com/Rafid-Bin-Sadeque/de-agent/blob/main/docs/read-only-access.md) to run themselves as an admin; never run it (creating a login is a write).
 - Optional: an ssh host alias if a source is only reachable from a bastion (`exec: ssh:<alias>`).
 
 ## Steps

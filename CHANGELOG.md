@@ -5,6 +5,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-03
+
+### Added
+- [docs/read-only-access.md](docs/read-only-access.md): copy-paste read-only logins for Postgres, Redshift, MySQL, Snowflake, BigQuery,
+  SQL Server and Databricks, plus the least-privilege setup for AWS, Airflow, GCP, Kubernetes and the HTTP packs. SAFETY.md called this
+  layer "documented" without saying how.
+
+### Changed
+- `hub-init` asks whether each source has a read-only login and shows the matching block for the human to run; `add-source` points to it.
+- START_HERE: the two "Works with your stack" sections are now "Works with your code" and "Works with your systems"; the real-platform
+  steps start with the read-only login.
+
 ## [0.2.0] - 2026-10-28
 
 ### Added

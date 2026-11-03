@@ -80,11 +80,13 @@ else
 fi
 echo "== 2. fill placeholders: owner=$OWNER repo=$REPO version=$VERSION"
 git switch -q -c "$TMP_BRANCH" main
-FILES="$(git ls-files README.md cli/pyproject.toml cli/README.md '.claude-plugin/*.json' 'docs/*' | tr '\n' ' ')"
+FILES="$(git ls-files README.md cli/pyproject.toml cli/README.md '.claude-plugin/*.json' 'docs/*' 'skills/*' 'agents/*' | tr '\n' ' ')"
 # shellcheck disable=SC2086
 [ -z "$FILES" ] || perl -pi -e "s{OWNER/groundtruth}{$OWNER/$REPO}g; s{OWNER/de-agent}{$OWNER/$REPO}g; s{github\.com/OWNER/}{github.com/$OWNER/}g; s{github\.com:OWNER/}{github.com:$OWNER/}g" $FILES
 git add -A
 git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" commit -q -m "fill placeholders" --allow-empty
+LEFT="$(git grep -n -e 'github\.com/OWNER/' -e 'github\.com:OWNER/' "$TMP_BRANCH" -- . ':!tools/release.sh' ':!cli/tests' || true)"
+if [ -n "$LEFT" ]; then echo "refusing: unfilled OWNER placeholders (add the file to FILES):" >&2; echo "$LEFT" | cut -d: -f2,3 >&2; exit 1; fi
 TREE="$(git rev-parse "${TMP_BRANCH}^{tree}")"
 
 if [ -n "$BASE" ] && [ "$(git rev-parse "${BASE}^{tree}")" = "$TREE" ]; then

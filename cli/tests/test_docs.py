@@ -35,7 +35,7 @@ def test_every_config_field_is_documented():
 
 
 def _markdown_files():
-    skip = ("evals/results", "cli/tests/", "demo/", "cli/.venv", "node_modules", ".git/")
+    skip = ("evals/results", "cli/tests/", "demo/", "cli/.venv", "node_modules", ".git/", ".claude/")  # .claude/: agent worktrees
     for p in sorted(ROOT.rglob("*.md")):
         rel = p.relative_to(ROOT).as_posix()
         if not any(rel.startswith(s) or f"/{s}" in f"/{rel}" for s in skip):

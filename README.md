@@ -3,7 +3,7 @@
 For data engineers using Claude Code on Postgres, Redshift, Airflow, dbt and AWS.
 
 Ground-truth context, enforced guardrails and workflows for data engineering with [Claude Code](https://claude.com/claude-code).
-Status: v0.2.0. Apache-2.0.
+Status: v0.2.1. Apache-2.0.
 
 > **New to this?** Read [docs/START_HERE.md](docs/START_HERE.md) first. It explains everything in plain words, with pictures,
 > in about 10 minutes.
@@ -181,7 +181,7 @@ system in the test suite; `fixtures` means hand-built from the vendor's document
 
 ## Safety model
 
-The primary control is a read-only database role for the agent. On top of it: `dea query` runs inside a read-only transaction; `sql_guard`
+The primary control is a read-only database role for the agent ([setup per system](docs/read-only-access.md)). On top of it: `dea query` runs inside a read-only transaction; `sql_guard`
 denies database writes (and anything it cannot parse) unless the `executor` agent runs a statement from a plan you signed; `secret_guard`
 blocks credentials and key files; `cli_guard` denies writes through `aws`, `gcloud`, `kubectl`, `terraform`, `dbt`, `airflow` and the other data CLIs (an unknown verb is denied too), recursing into `docker exec` and `kubectl exec`; `approval_guard` keeps `dea approve` human-only; `test_guard` blocks removing or weakening dbt tests; `self_guard` stops agents editing the guards, the guard mode or the hook settings.
 These stop accidents and casual bypass. They are not a sandbox against a hostile local process, and a program that reaches the database

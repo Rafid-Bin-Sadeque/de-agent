@@ -190,3 +190,20 @@ def test_denylist_file_is_applied_to_tree_diff_and_history(scratch, tmp_path):
     r = release(repo, env={"DEA_DENYLIST_FILE": str(deny)})
     assert r.returncode == 1 and "deny-list" in r.stdout and "tree 1" in r.stdout
     assert "Secret-Codename" not in r.stdout + r.stderr  # counts and file:line only, never the match
+
+
+def test_skills_are_filled_and_an_unfilled_owner_link_refuses_with_main_left_clean(scratch):
+    repo, _ = scratch
+    (repo / "skills" / "s").mkdir(parents=True)
+    (repo / "skills" / "s" / "SKILL.md").write_text("docs at https://github.com/OWNER/de-agent/blob/main/x.md\n")
+    commit_all(repo, "skill")
+    r = release(repo)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "github.com/acme/de-agent" in git(repo, "show", "release/v0.1.0:skills/s/SKILL.md")
+    (repo / "misc").mkdir()
+    (repo / "misc" / "note.md").write_text("see https://github.com/OWNER/other\n")
+    set_version(repo, "0.1.1")
+    commit_all(repo, "unfilled")
+    r = release(repo, "--version", "0.1.1")
+    assert r.returncode != 0 and "unfilled OWNER placeholders" in r.stderr and "misc/note.md" in r.stderr
+    assert git(repo, "status", "--porcelain") == "" and git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"

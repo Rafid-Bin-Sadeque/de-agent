@@ -123,7 +123,7 @@ cd demo && claude --plugin-dir ..
 There are six faults to try (`N=01` … `06`): a renamed column, a paused pipeline, a bloated table, a missing index, a failing data test,
 and a query stuck behind a lock. Each one's expected answer is in `demo/faults/NN_*/EXPECTED.md`, so you can check Claude's work.
 
-## Works with your stack
+## Works with your code
 
 `dea scan` reads your code (it never runs it) and builds the table-level map Claude uses for "what breaks if this changes". Three common shapes:
 
@@ -161,16 +161,17 @@ What a scan cannot see is listed in [writing-a-scanner.md](writing-a-scanner.md)
 ## Using it on your real platform
 
 1. `dea init` in a new folder. That folder is your hub.
-2. Edit `de-agent.yaml` to list your repos and databases. **Never put a password in it.** Point to `~/.pgpass` or an environment variable instead.
+2. Create a read-only login for each database ([read-only-access.md](read-only-access.md)). Then edit `de-agent.yaml` to list your repos and databases. **Never put a password in it.** Point to `~/.pgpass` or an environment variable instead.
 3. `dea doctor` (checks everything is reachable), then `dea scan` (reads your code), then `dea snapshot` (reads your systems).
 4. Open Claude in that folder and start asking.
 
 Step-by-step with examples: [adoption.md](adoption.md). Every config option: [configuration.md](configuration.md).
 
-**Good practice:** give the database user de-agent uses **read-only** permissions. The safety rules are strong, but a read-only user
-makes accidents impossible at the database level too.
+**Do this first:** give de-agent its own **read-only** login. The safety rules are strong, but a read-only login makes accidents impossible
+at the database level too. Copy-paste setup for Postgres, Redshift, MySQL, Snowflake, BigQuery, SQL Server, Databricks, AWS, Airflow and
+Kubernetes: [read-only-access.md](read-only-access.md). A human runs it once; Claude cannot (creating a login is a write).
 
-## Works with your stack
+## Works with your systems
 
 You do not need a special integration for your tools. Three examples:
 
