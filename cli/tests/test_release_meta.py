@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_versions_agree():
     py = re.search(r'^version = "([^"]+)"', (ROOT / "cli" / "pyproject.toml").read_text(), re.M).group(1)
     plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
+    market = [p.get("version") for p in json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())["plugins"]]
     assert py == plugin == de_agent.__version__
+    assert market == [plugin]  # `claude plugin validate --strict` fails on a mismatch
 
 
 def test_marketplace_names_the_plugin():
