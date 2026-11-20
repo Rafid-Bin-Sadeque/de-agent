@@ -1,4 +1,4 @@
-"""export_daily_orders (daily 02:00): analytics.mart_daily_revenue -> CSV in s3://exports/daily_revenue/date=<ds>/."""
+"""export_daily_orders (daily 02:00): CALL analytics.refresh_orders(), then analytics.mart_daily_revenue -> CSV in s3://exports/daily_revenue/date=<ds>/."""
 import csv
 import io
 from datetime import datetime, timedelta
@@ -7,6 +7,7 @@ from airflow import DAG
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 BUCKET = "exports"
@@ -37,4 +38,5 @@ with DAG(
     default_args={"owner": "analytics-eng", "retries": 0, "execution_timeout": timedelta(minutes=15)},
     tags=["acme", "export"],
 ) as dag:
-    PythonOperator(task_id="export_revenue_csv", python_callable=export)
+    refresh = SQLExecuteQueryOperator(task_id="refresh_orders", conn_id="warehouse", sql="CALL analytics.refresh_orders()")
+    refresh >> PythonOperator(task_id="export_revenue_csv", python_callable=export)

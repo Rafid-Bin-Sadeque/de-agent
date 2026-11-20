@@ -44,3 +44,12 @@ _Pack `postgres-lite` v1, sql, validated: live._
 |---|---|---|---|
 | shop | orders | 524288000 | 180000 |
 | shop | customers | 41943040 | 120000 |
+
+## Routines
+
+| schema | procedure | function | view | total |
+|---|---|---|---|---|
+| shop | 1 | 1 | 1 | 3 |
+
+- parse coverage: full 3, heuristic 0, none 0
+- truncated: 0, redacted: 0, without a body: 0

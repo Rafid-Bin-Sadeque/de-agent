@@ -179,3 +179,80 @@ def test_demo_hub_is_lint_clean():
     demo = Path(__file__).resolve().parents[2] / "demo"
     errors = [f for f in run_lint(demo) if f.level == "error"]
     assert errors == [], errors
+
+
+# ---------------- v0.3.1: configurable map file ----------------
+
+def _use_map_file(hub, name):
+    (hub / name).parent.mkdir(exist_ok=True)
+    (hub / "map.md").rename(hub / name)
+    cfg = hub / "de-agent.yaml"
+    cfg.write_text(cfg.read_text().replace("retention: 30}", f"retention: 30, map_file: {name}}}", 1))
+
+
+def test_map_file_override_is_linted(example_hub):
+    _use_map_file(example_hub, "_map.md")
+    assert lint(example_hub) == []  # no "map.md is missing", orphan index read from the renamed map
+    (example_hub / "_map.md").write_text((example_hub / "_map.md").read_text() + "\n" + "word " * 1600)
+    f = rules(lint(example_hub), "map-budget")
+    assert len(f) == 1 and f[0].path == "_map.md"
+
+
+def test_map_file_missing_reports_the_configured_name(tmp_path):
+    (tmp_path / "de-agent.yaml").write_text("version: 1\nhub:\n  map_file: docs/atlas.md\n")
+    f = rules(lint(tmp_path), "map-budget")
+    assert f[0].message == "docs/atlas.md is missing"
+
+
+def test_map_file_validation():
+    import pytest
+    from de_agent.config import ConfigError, parse_config
+
+    assert parse_config("version: 1\n").hub.map_file == "map.md"
+    assert parse_config("version: 1\n").hub.session_map is True
+    assert parse_config("version: 1\nhub: {map_file: sub/m.md, session_map: false}\n").hub.session_map is False
+    for bad in ("../m.md", "/abs/m.md", "m.txt", "a/../../m.md"):
+        with pytest.raises(ConfigError):
+            parse_config(f"version: 1\nhub: {{map_file: {bad}}}\n")
+
+
+# ---------------- v0.3.1 section 4: lint false positives ----------------
+
+def test_topic_pages_are_not_profiles(example_hub):
+    topic = example_hub / "projects" / "orders_etl"
+    topic.mkdir()
+    (topic / "load_flow.md").write_text("# Load flow\n\nSee [[orders_etl]].\n")  # no frontmatter, not in the map
+    f = lint(example_hub)
+    assert not rules(f, "profile-frontmatter") and not rules(f, "orphan-project")
+
+
+def test_topic_pages_still_get_budget_link_and_secret_checks(example_hub):
+    topic = example_hub / "projects" / "orders_etl"
+    topic.mkdir()
+    (topic / "deep.md").write_text("# Deep\n" + "line\n" * 160 + "[[nowhere_page]]\npassword=hunter2\n")
+    f = lint(example_hub)
+    assert rules(f, "page-budget") and rules(f, "broken-link") and rules(f, "secret-in-hub")
+
+
+def test_code_reference_password_is_not_a_secret(example_hub):
+    (example_hub / "conventions.md").write_text(
+        (example_hub / "conventions.md").read_text()
+        + '\nUse `conn(password=DB_CREDS["password"])`, `password=os.environ["PW"]`, `password=os.getenv("PW")`, '
+          "`password=cfg.get('pw')`, `password=settings.db[0]`.\n")
+    assert not rules(lint(example_hub), "secret-in-hub")
+
+
+def test_literal_password_still_flagged(example_hub):
+    for bad in ("password=hunter2", "password=a.b"):
+        (example_hub / "conventions.md").write_text("# c\n\n" + bad + "\n")
+        assert rules(lint(example_hub), "secret-in-hub"), bad
+
+
+def test_secretscan_code_ref_rule():
+    from de_agent.secretscan import find_secret
+
+    assert find_secret('password=MYSQL_PROD["password"]') is None
+    assert find_secret("password=os.environ.get('X')") is None
+    assert find_secret("password=hunter2")
+    assert find_secret("password=a.b")
+    assert find_secret("PGPASSWORD=fn(x)") is not None  # only password= gets the code-reference exception

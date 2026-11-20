@@ -191,13 +191,37 @@ def render_edges(edges: dict[str, Any], rev: str) -> dict[str, str]:
     lines += ["", "## DAG links", ""]
     links = edges["dag_links"]
     lines += [f"- {k['from']} → {k['to']} ({k['via']}{', external' if k.get('external') else ''})" for k in links] or ["none"]
+    if edges.get("calls"):
+        lines += ["", "## Calls", ""] + [f"- {c['from']} → {c['to']} ({c['via']})" for c in edges["calls"]]
     lines += ["", "## Unresolved", "",
               "Names referenced but never written anywhere in the scanned projects: external sources or typos.", ""]
-    lines += [f"- {u['kind']} {u['name']} (referenced by {u['referenced_by']})" for u in edges["unresolved"]] or ["none"]
+    lines += [f"- {u['kind']} {u['name']} (referenced by {u['referenced_by']})"
+              + (f", candidates: {', '.join(u['candidates'])}" if u.get("candidates") else "")
+              for u in edges["unresolved"]] or ["none"]
     lines += ["", "## Counts", ""] + [f"- {k}: {v}" for k, v in sorted(edges["stats"].items())]
     md = _fm(rev, type="edges") + "\n".join(lines) + "\n"
     js = json.dumps({"generated": rev, **edges}, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
     return {"catalog/edges.md": md, "catalog/edges.json": js}
+
+
+def render_routines(rt: dict[str, Any], drifts: list[dict[str, Any]], rev: str) -> dict[str, str]:
+    """catalog/routines.json (the parse cache + edge input) and catalog/routines.md (summary, parse coverage, drift)."""
+    lines = ["# Live routines", "", "Parsed by `dea scan` from the latest snapshots' routine bodies (`.dea/routines`). "
+             "`dea impact proc:<schema.name>` walks them.", ""]
+    for source, entries in sorted(rt["sources"].items()):
+        cov: dict[str, int] = {}
+        kinds: dict[str, int] = {}
+        for e in entries.values():
+            cov[e["parse"]] = cov.get(e["parse"], 0) + 1
+            kinds[e["kind"]] = kinds.get(e["kind"], 0) + 1
+        lines += [f"## {source}", "", f"- routines: {len(entries)} ({', '.join(f'{k} {v}' for k, v in sorted(kinds.items())) or 'none'})",
+                  f"- parse coverage: {', '.join(f'{k} {v}' for k, v in sorted(cov.items())) or 'none'}", ""]
+    lines += ["## Repo drift", ""]
+    lines += [f"- {d['source']}: routine {d['routine']}{d['args']} differs from {d['repo']} "
+              "(live changed outside the repo, or the repo is ahead)" for d in drifts] or ["none"]
+    md = _fm(rev, type="routines") + "\n".join(lines) + "\n"
+    js = json.dumps({"generated": rev, **rt, "drift": drifts}, indent=1, sort_keys=True, ensure_ascii=False) + "\n"
+    return {"catalog/routines.md": md, "catalog/routines.json": js}
 
 
 def render_symbols_json(symbols_by_scan: dict[str, dict[str, Any]], rev: str) -> dict[str, str]:

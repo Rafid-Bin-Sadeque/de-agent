@@ -140,7 +140,7 @@ class Evaluator:
             if all(c is not None for c in cols):
                 rows = list(zip(*cols))
         elif isinstance(node, ast.Call) and _name_of(node.func) == "range":
-            rows = self.iter_values(node, scopes)
+            rows = self._iter_values(node, scopes)  # no iter_values: it falls back to iter_rows (infinite recursion)
         else:
             val = self._seq(node, scopes)
             if isinstance(val, dict):

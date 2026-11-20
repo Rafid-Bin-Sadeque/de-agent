@@ -243,15 +243,19 @@ def edges(table: str = typer.Argument(..., help="schema.table, e.g. analytics.fc
 
 @app.command("impact")
 def impact(
-    target: str = typer.Argument(..., help="util symbol (module.func) or schema.table"),
+    target: str = typer.Argument(..., help="util symbol (module.func), schema.table, or proc:/function:/view:/trigger:<schema.name>"),
     depth: int = typer.Option(5, "--depth", min=1, max=10, help="Max downstream hops for a table (1-10)"),
 ) -> None:
-    """Symbol: the DAGs that use it. Table: downstream readers, transitively, with the path."""
-    from de_agent.scanners.edges import downstream
+    """Symbol: the DAGs that use it. Table: downstream readers, transitively, with the path (routines list their callers).
+    proc:/function:/view:/trigger: <name>: what a live routine reads and writes, who calls it, and everything downstream."""
+    from de_agent.scanners.edges import callers, downstream
 
     hub = _require_hub()
-    key = target.lower()
     data = _load_edges(hub)
+    if target.split(":", 1)[0] in ("proc", "function", "view", "trigger") and ":" in target:
+        _impact_routine(data, target, depth)
+        return
+    key = target.lower()
     syms = _load_symbols(hub)
     if key not in data["tables"] and not any(q == target or q.endswith("." + target) for q in syms):
         key = _resolve_table(data, target) or key
@@ -260,6 +264,9 @@ def impact(
         typer.echo(f"impact of table {key} (downstream readers, depth <= {depth}): {len(rows)}")
         for r in sorted(rows, key=lambda r: (r["depth"], r["reader"])):
             typer.echo(f"  depth {r['depth']}  {r['reader']} [{r['project']}]  {' -> '.join(r['path'])}")
+            if r["reader"] in data.get("routines", {}):
+                for c in callers(data, r["reader"]):
+                    typer.echo(f"      called by {c}")
         return
     match = [q for q in syms if q == target or q.endswith("." + target)]
     if match:
@@ -269,7 +276,37 @@ def impact(
             for d in s["dags"]:
                 typer.echo(f"  {d['dag_id']}  {d['file']}")
         return
-    _unknown("table or symbol", target, [*data["tables"], *syms])
+    _unknown("table or symbol", target, [*data["tables"], *syms, *sorted(data.get("routines", {}))])
+
+
+def _impact_routine(data: dict, target: str, depth: int) -> None:
+    from de_agent.scanners.edges import callers, downstream, find_routines
+
+    ids = find_routines(data, target)
+    if not ids:
+        _unknown("routine", target, sorted(data.get("routines", {})))
+    for rid in ids:
+        r = data["routines"][rid]
+        typer.echo(f"impact of {rid} ({r['kind']}, {r['source']}{r['args'] and ' ' + r['args']}, parse {r['parse']})")
+        typer.echo("reads: " + (", ".join(r["reads"]) or "none"))
+        typer.echo("writes: " + (", ".join(r["writes"]) or "none"))
+        typer.echo("calls: " + (", ".join(r["calls"]) or "none"))
+        cs = callers(data, rid)
+        typer.echo("called by:" + ("" if cs else " none"))
+        for c in cs:
+            typer.echo(f"  {c}")
+        seen: set[tuple[str, str]] = set()
+        outs = r["writes"] if r["kind"] != "view" else [r["name"]]
+        typer.echo(f"downstream of {'/'.join(outs) or 'nothing it writes'} (depth <= {depth}):")
+        for t in outs:
+            for row in sorted(downstream(data, t, depth), key=lambda x: (x["depth"], x["reader"])):
+                if (row["reader"], t) in seen or row["reader"] == rid:
+                    continue
+                seen.add((row["reader"], t))
+                typer.echo(f"  depth {row['depth']}  {row['reader']} [{row['project']}]  {' -> '.join(row['path'])}")
+                if row["reader"] in data.get("routines", {}):
+                    for c in callers(data, row["reader"]):
+                        typer.echo(f"      called by {c}")
 
 
 def _fmt_cell(v: object) -> str:
@@ -591,6 +628,125 @@ def doctor() -> None:
     for mark, name, detail in rows:
         typer.echo(f"{mark} {name.ljust(width)}  {detail}")
     raise typer.Exit(1 if any(m == "✗" for m, _, _ in rows) else 0)
+
+
+export_app = typer.Typer(help="Export snapshot data (read-only, no live calls).", no_args_is_help=True)
+app.add_typer(export_app, name="export")
+
+DMS_MAPPING_COLUMNS = ["task", "schema", "table", "target_schema", "target_table", "rule", "source_endpoint", "target_endpoint"]
+
+
+@export_app.command("dms-mappings")
+def export_dms_mappings(
+    csv_path: Path | None = typer.Option(None, "--csv", help="Write the CSV to this file (default: stdout)"),
+    source: str | None = typer.Option(None, "--source", help="Only this aws source (default: every aws source with the section)"),
+) -> None:
+    """Export the dms_table_mappings section of the latest snapshot as CSV. No AWS call."""
+    import csv
+    import io
+
+    from de_agent.snapshot import list_snapshots, load_result
+
+    hub = _require_hub()
+    cfg = _load(hub)
+    names = [s.name for s in cfg.sources if s.type == "aws" and (source is None or s.name == source)]
+    snaps = list_snapshots(hub)
+    if not snaps:
+        typer.echo("no snapshot yet: run `dea snapshot` first", err=True)
+        raise typer.Exit(2)
+    rows: list[dict] = []
+    found = False
+    for name in names:
+        # newest snapshot that ran this source (a later `dea snapshot --source other` does not hide it)
+        res = next((r for sid in reversed(snaps) if (r := load_result(hub, sid, name)) is not None), None)
+        data = (res or {}).get("data") or {}
+        section = data.get("dms_table_mappings")
+        if not isinstance(section, list):
+            continue
+        found = True
+        rows.extend(section)
+        if "dms_table_mappings" in ((data.get("meta") or {}).get("truncated") or []):
+            typer.echo(f"warning: {name}: list is capped; raise options.dms_mappings_max", err=True)
+    if not found:
+        typer.echo("no dms_table_mappings section in the latest snapshot (needs an aws source with services.dms)", err=True)
+        raise typer.Exit(2)
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=DMS_MAPPING_COLUMNS, extrasaction="ignore", lineterminator="\n")
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in DMS_MAPPING_COLUMNS})
+    if csv_path:
+        csv_path.write_text(buf.getvalue(), encoding="utf-8")
+        typer.echo(f"wrote {csv_path} ({len(rows)} rows)", err=True)
+    else:
+        sys.stdout.write(buf.getvalue())
+
+
+schedule_app = typer.Typer(help="Print a job that keeps snapshots fresh (prints only, never installs).", no_args_is_help=True)
+app.add_typer(schedule_app, name="schedule")
+
+
+def _snapshot_wrapper(hub: Path, dea: str, sources: list[str]) -> str:
+    import shlex
+
+    log = shlex.quote(str(hub / ".dea" / "logs" / "snapshot.log"))
+    logs = shlex.quote(str(hub / ".dea" / "logs"))
+    cmd = shlex.quote(dea) + " snapshot" + "".join(f" --source {shlex.quote(x)}" for x in sources)
+    rotate = (f'if [ -f {log} ] && [ "$(wc -c < {log})" -gt 1048576 ]; then i=6; '
+              f'while [ $i -ge 1 ]; do [ -f {log}.$i ] && mv {log}.$i {log}.$((i+1)); i=$((i-1)); done; mv {log} {log}.1; fi')
+    return f"mkdir -p {logs}; {rotate}; {cmd} >> {log} 2>&1"
+
+
+@schedule_app.command("print")
+def schedule_print(
+    at: str = typer.Option("06:00", "--at", help="Daily run time, HH:MM (local)"),
+    sources: str = typer.Option("", "--sources", help="Comma-separated source names (default: all)"),
+    os_name: str | None = typer.Option(None, "--os", hidden=True, help="macos or linux (default: this machine)"),
+) -> None:
+    """Print a launchd plist (macOS) or a crontab line (elsewhere) that runs `dea snapshot` daily. Installs nothing."""
+    import re
+    import shlex
+    from xml.sax.saxutils import escape
+
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", at)
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        typer.echo(f"bad --at {at!r}: expected HH:MM (00:00-23:59)", err=True)
+        raise typer.Exit(2)
+    hour, minute = int(m.group(1)), int(m.group(2))
+    if os_name not in (None, "macos", "linux"):
+        typer.echo("bad --os: macos or linux", err=True)
+        raise typer.Exit(2)
+    hub = _require_hub()
+    dea = shutil.which("dea") or str(Path(sys.argv[0]).resolve())
+    names = [x.strip() for x in sources.split(",") if x.strip()]
+    wrapper = _snapshot_wrapper(hub, dea, names)
+    macos = (os_name == "macos") if os_name else sys.platform == "darwin"
+    if macos:
+        def x(v: object) -> str:
+            return escape(str(v))
+
+        typer.echo("\n".join([
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+            '<plist version="1.0">', '<dict>',
+            '  <key>Label</key><string>io.de-agent.snapshot</string>',
+            '  <key>ProgramArguments</key>', '  <array>',
+            '    <string>/bin/sh</string>', '    <string>-c</string>', f'    <string>{x(wrapper)}</string>', '  </array>',
+            '  <key>EnvironmentVariables</key>', '  <dict>',
+            f'    <key>DEA_HUB</key><string>{x(hub)}</string>',
+            f'    <key>PATH</key><string>{x(os.environ.get("PATH", ""))}</string>', '  </dict>',
+            '  <key>StartCalendarInterval</key>', '  <dict>',
+            f'    <key>Hour</key><integer>{hour}</integer>', f'    <key>Minute</key><integer>{minute}</integer>', '  </dict>',
+            '  <key>RunAtLoad</key><false/>', '</dict>', '</plist>',
+            "<!--",
+            "de-agent prints this and installs nothing. To install it, save it to",
+            "  ~/Library/LaunchAgents/io.de-agent.snapshot.plist",
+            "and run",
+            "  launchctl load ~/Library/LaunchAgents/io.de-agent.snapshot.plist",
+            "-->"]))
+    else:
+        typer.echo(f"{minute} {hour} * * * DEA_HUB={shlex.quote(str(hub))} /bin/sh -c {shlex.quote(wrapper)}")
+        typer.echo("# de-agent prints this and installs nothing. Add the line above with `crontab -e`.")
 
 
 config_app = typer.Typer(help="de-agent.yaml tooling.", no_args_is_help=True)

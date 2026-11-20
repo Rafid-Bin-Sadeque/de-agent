@@ -67,7 +67,7 @@ class Section(_Strict):
     signals: list[Signal] = Field(default_factory=list)
     render: Literal["table", "list"] = "table"
     volatile: list[str] = Field(default_factory=list)
-    limit: int = Field(200, ge=1, le=1000)
+    limit: int = Field(200, ge=1, le=100_000)  # > 1000 only for the reserved `routines` section (checked in check_pack)
     for_each: str | None = None
     item_as: str | None = Field(None, description="Row field that receives the for_each value (default: the value is not added).")
 

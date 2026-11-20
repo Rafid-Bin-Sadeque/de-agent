@@ -1,0 +1,2 @@
+0 6 * * * DEA_HUB=<HUB> /bin/sh -c 'mkdir -p <HUB>/.dea/logs; if [ -f <HUB>/.dea/logs/snapshot.log ] && [ "$(wc -c < <HUB>/.dea/logs/snapshot.log)" -gt 1048576 ]; then i=6; while [ $i -ge 1 ]; do [ -f <HUB>/.dea/logs/snapshot.log.$i ] && mv <HUB>/.dea/logs/snapshot.log.$i <HUB>/.dea/logs/snapshot.log.$((i+1)); i=$((i-1)); done; mv <HUB>/.dea/logs/snapshot.log <HUB>/.dea/logs/snapshot.log.1; fi; /fake/bin/dea snapshot >> <HUB>/.dea/logs/snapshot.log 2>&1'
+# de-agent prints this and installs nothing. Add the line above with `crontab -e`.

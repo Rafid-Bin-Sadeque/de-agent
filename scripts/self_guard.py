@@ -26,7 +26,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _guardlib import input_too_large, parse_cli_allow  # noqa: E402
-from test_guard import _REDIR, after_content, read_text, split_commands  # noqa: E402
+from test_guard import _REDIR, WRITE_HINT, after_content, read_text, split_commands  # noqa: E402
 
 PROTECTED = ("hooks", "scripts", ".claude-plugin", "agents", "skills")
 PROTECTED_PATHS = (("cli", "src"), ("cli", "pyproject.toml"))
@@ -276,10 +276,47 @@ _PY_WRITE = re.compile(
 _EDITORS = {"vi", "vim", "nvim", "view", "ex", "gvim", "vimdiff", "nano", "pico"}
 
 
+_INTERP = re.compile(r"(?:python[0-9.]*|perl|ruby|node|nodejs|bun|deno|php)$")
+_LITERAL = re.compile(r"""(['"])([^'"\s]+)\1""")  # a quoted string with no whitespace: a path, not prose
+
+
 def mentions_yaml(text):
     if "de-agent.yaml" in text:
         return True
     return any(_glob_tok(t) and fnmatch.fnmatchcase("de-agent.yaml", t) for t in re.findall(r"[\w.*?\[\]{}-]+", text))
+
+
+def _yaml_path(tok):
+    """`tok` names de-agent.yaml as a path (or a glob matching it), not as a word inside a sentence."""
+    if not tok or any(ch.isspace() for ch in tok):
+        return False
+    base = tok.rstrip("/").rsplit("/", 1)[-1]
+    return base == "de-agent.yaml" or (_glob_tok(base) and fnmatch.fnmatchcase("de-agent.yaml", base))
+
+
+def _yaml_ref(command, rest):
+    """The interpreter is pointed at de-agent.yaml: an argument, or a quoted path literal in its code."""
+    return any(_yaml_path(a) for a in rest) or any(_yaml_path(m.group(2)) for m in _LITERAL.finditer(command))
+
+
+def _script_write_verdict(command, cmds, cwd, root):
+    """Interpreter code (`python3 - <<EOF`, `python -c`, `node -e`, ...) that writes and quotes a protected path."""
+    if not root or not any(_INTERP.match(os.path.basename(w)) for words in cmds for w in words[:3]):
+        return None
+    if not (_PY_WRITE.search(command) or WRITE_HINT.search(command)):
+        return None
+    dirs = [cwd] + [resolve(w[1], cwd) for w in cmds
+                    if len(w) > 1 and os.path.basename(w[0]) in ("cd", "pushd") and not w[1].startswith("-")]
+    for m in _LITERAL.finditer(command):
+        lit = m.group(2)
+        if "/" not in lit and lit not in PROTECTED:
+            continue
+        for d in dirs:
+            real = resolve(lit, d)
+            if in_plugin(real, root):
+                return (f"{MSG}: interpreter code that writes may not touch the plugin's own hooks, scripts, agents or "
+                        f"skills ({os.path.relpath(real, root)}){HATCH}")
+    return None
 
 
 def _yaml_writer(command, cmds):
@@ -290,7 +327,7 @@ def _yaml_writer(command, cmds):
         for k, w in enumerate(words):
             name = os.path.basename(w)
             rest = words[k + 1:]
-            if _PY_NAME.match(name) and _PY_WRITE.search(command):
+            if _PY_NAME.match(name) and _PY_WRITE.search(command) and _yaml_ref(command, rest):
                 return name
             if name in ("perl", "ruby") and any(re.match(r"-[A-Za-z]*[eEi]", a) for a in rest):
                 return name
@@ -342,6 +379,9 @@ def check_bash(command, cwd, root):
     w = _yaml_writer(command, cmds)
     if w:
         return f"{MSG}: `{w}` can write to de-agent.yaml (it holds the guard mode and writable sources); use the Edit tool"
+    why = _script_write_verdict(command, cmds, cwd, root)
+    if why:
+        return why
     for words in cmds:
         why = check_simple(words, cwd, root)
         if why:

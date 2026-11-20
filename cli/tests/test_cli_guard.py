@@ -36,7 +36,9 @@ def run_hook(script, command, project, env_extra=None, agent_type=None):
     payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(project)}
     if agent_type:
         payload["agent_type"] = agent_type
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(project), CLAUDE_PLUGIN_ROOT=str(ROOT), XDG_CONFIG_HOME=str(Path(project) / ".xdg"))
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(project), CLAUDE_PLUGIN_ROOT=str(ROOT), XDG_CONFIG_HOME=str(Path(project) / ".xdg"),
+               HOME=str(Path(project) / ".home"))  # no real user config or hub leaks into a hook run
+    env.pop("DEA_HUB", None)
     env.pop("DEA_ALLOW_PLUGIN_EDITS", None)
     env.update(env_extra or {})
     p = subprocess.run([HOOK_PYTHON, str(script)], input=json.dumps(payload), capture_output=True, text=True, env=env,

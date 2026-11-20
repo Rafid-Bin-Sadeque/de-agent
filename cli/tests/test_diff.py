@@ -123,7 +123,8 @@ def test_build_diff_markdown_and_no_changes(tmp_path):
     c = copy.deepcopy(b)
     c["collected_at"] = "2026-10-27T12:00:00Z"
     _write(hub, "20261027T120000Z", c)
-    assert D.render_markdown(D.build_diff(hub)) == "No changes since 2026-10-27 11:00 UTC (1.0 h).\n"
+    md = D.render_markdown(D.build_diff(hub))
+    assert md.startswith("No changes since 2026-10-27 11:00 UTC (1.0 h).\n") and "take a new one (`dea snapshot`)" in md
     # --since compares against the older snapshot
     since = D.render_markdown(D.build_diff(hub, since="20261027T090000Z"))
     assert "n_dead_tup" in since and "09:00 UTC (3.0 h)" in since
@@ -142,7 +143,8 @@ def test_failed_snapshot_is_skipped(tmp_path):
 
 def test_single_snapshot_has_no_baseline(tmp_path):
     _write(tmp_path, "20261027T090000Z", result())
-    assert "No earlier snapshot" in D.render_markdown(D.build_diff(tmp_path))
+    md = D.render_markdown(D.build_diff(tmp_path))
+    assert "No earlier snapshot" in md and "`dea snapshot`" in md   # tells the agent how to compare against live
 
 
 def test_errors(tmp_path):

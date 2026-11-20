@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.de-agent.snapshot</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>mkdir -p <HUB>/.dea/logs; if [ -f <HUB>/.dea/logs/snapshot.log ] &amp;&amp; [ "$(wc -c &lt; <HUB>/.dea/logs/snapshot.log)" -gt 1048576 ]; then i=6; while [ $i -ge 1 ]; do [ -f <HUB>/.dea/logs/snapshot.log.$i ] &amp;&amp; mv <HUB>/.dea/logs/snapshot.log.$i <HUB>/.dea/logs/snapshot.log.$((i+1)); i=$((i-1)); done; mv <HUB>/.dea/logs/snapshot.log <HUB>/.dea/logs/snapshot.log.1; fi; /fake/bin/dea snapshot --source dwh --source aws_main &gt;&gt; <HUB>/.dea/logs/snapshot.log 2&gt;&amp;1</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DEA_HUB</key><string><HUB></string>
+    <key>PATH</key><string>/fake/bin:/usr/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>7</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>
+<!--
+de-agent prints this and installs nothing. To install it, save it to
+  ~/Library/LaunchAgents/io.de-agent.snapshot.plist
+and run
+  launchctl load ~/Library/LaunchAgents/io.de-agent.snapshot.plist
+-->

@@ -110,6 +110,14 @@ Params and templating:
 - In rules, a param is available as `p_<name>` (`age_h(succeeded_at) > p_stale_hours`).
 - Messages use `{field}` for row fields (`{count}` in a `rows:` rule); an unknown field renders as `-`.
 
+### The reserved `routines` section
+
+A SQL pack can ship a section named `routines` (see [routines.md](routines.md)). `dea pack check` enforces the row contract: `key: [schema, name, args]`,
+a declared `columns:` list containing `schema, name, kind, args, language, returns, owner, definition`, and no `for_each`. The collector then hashes,
+redacts and stores each `definition` outside the snapshot and drops it from the row. The section's row cap is the `routines_max` option, not `limit:` (a
+`limit` above 1000 is only allowed here). The options `routines`, `routine_kinds`, `routines_max` and `routines_max_bytes` are accepted by every pack
+source.
+
 ## Safe expressions
 
 `when:` and `rows:` use a tiny evaluator built on Python `ast` with a whitelist. Nothing is compiled or `eval`ed: the tree is walked by an interpreter

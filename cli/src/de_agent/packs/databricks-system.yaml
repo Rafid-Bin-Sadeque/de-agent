@@ -42,3 +42,17 @@ sections:
     signals:
       - rows: "count > 0"
         message: "{count} failed SQL statement(s) in 24h"
+  - name: routines
+    sql: |
+      select routine_catalog || '.' || routine_schema as `schema`, routine_name as name,
+             case routine_type when 'PROCEDURE' then 'procedure' else 'function' end as kind,
+             '' as args, lower(coalesce(external_language, routine_body, 'sql')) as language, coalesce(lower(data_type), '') as returns,
+             '' as owner, routine_definition as definition
+      from system.information_schema.routines
+      where routine_schema <> 'information_schema' and routine_catalog not in ('system', '__databricks_internal')
+      union all
+      select table_catalog || '.' || table_schema, table_name, 'view', '', 'sql', '', '', view_definition
+      from system.information_schema.views
+      where table_schema <> 'information_schema' and table_catalog not in ('system', '__databricks_internal')
+    key: [schema, name, args]
+    columns: [schema, name, kind, args, language, returns, owner, definition]

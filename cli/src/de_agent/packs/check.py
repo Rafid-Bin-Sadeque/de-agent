@@ -13,6 +13,8 @@ from de_agent.packs import template
 from de_agent.packs.errors import PackError
 from de_agent.packs.expr import compile_expr
 from de_agent.packs.model import Pack, Section, parse_pack
+from de_agent.routines import KEY as ROUTINE_KEY
+from de_agent.routines import REQUIRED_COLUMNS as ROUTINE_COLUMNS
 from de_agent.sqlclass import classify
 
 MSG_FIELD = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -88,12 +90,35 @@ def _check_jmespath(expr: str, where: str, errs: list[str]) -> None:
         errs.append(f"{where}: invalid JMESPath ({type(ex).__name__}: {str(ex).splitlines()[0] if str(ex) else ''})")
 
 
+ROUTINES_SECTION = "routines"  # reserved: the v0.3 row contract (docs/routines.md)
+MAX_SECTION_LIMIT = 1000
+
+
+def _check_routines(sec: Section, err: Any) -> None:
+    if sec.keys != ROUTINE_KEY:
+        err(f"the reserved `routines` section needs `key: [{', '.join(ROUTINE_KEY)}]`")
+    if not sec.columns:
+        err("the reserved `routines` section must declare `columns:` (the row contract needs "
+            f"{', '.join(ROUTINE_COLUMNS)})")
+    else:
+        missing = [c for c in ROUTINE_COLUMNS if c not in sec.columns]
+        if missing:
+            err(f"the reserved `routines` section is missing column(s): {', '.join(missing)}")
+    if sec.for_each:
+        err("the reserved `routines` section cannot use for_each")
+
+
 def _check_section(pack: Pack, sec: Section, errs: list[str]) -> None:
     w = f"section {sec.name}"
     specs = pack.params
 
     def err(msg: str) -> None:
         errs.append(f"{w}: {msg}")
+
+    if sec.name == ROUTINES_SECTION:
+        _check_routines(sec, err)
+    elif sec.limit > MAX_SECTION_LIMIT:
+        err(f"limit may not exceed {MAX_SECTION_LIMIT} (only the reserved `routines` section may go higher)")
 
     if sec.for_each:
         spec = specs.get(sec.for_each)

@@ -12,6 +12,7 @@ from typing import Any, Callable
 from de_agent.collectors import get_collector
 from de_agent.config import Config
 from de_agent.render import HEADER, render_pages, signals_for
+from de_agent.routines import RoutineStore, referenced_hashes
 from de_agent.runner import result_status, run_sources
 
 SNAP_RE = re.compile(r"^\d{8}T\d{6}Z$")
@@ -83,7 +84,8 @@ def _write_index(hub: Path, cfg: Config, snaps: list[str]) -> None:
 
 
 def _write_pages(plat: Path, source: str, pages: dict[str, str]) -> None:
-    """Write a source's page(s); a split AWS page lives in platform/<source>/, and leftovers of the other layout go."""
+    """Write a source's page(s); a split AWS page lives in platform/<source>/, routine pages in platform/<source>/routines/,
+    and leftovers of an earlier layout go."""
     for rel, text in pages.items():
         (plat / rel).parent.mkdir(parents=True, exist_ok=True)
         _write_atomic(plat / rel, text)
@@ -92,6 +94,13 @@ def _write_pages(plat: Path, source: str, pages: dict[str, str]) -> None:
         for p in sorted(sub.glob("*.md")):
             if f"{source}/{p.name}" not in pages:
                 p.unlink()
+        rdir = sub / "routines"
+        if rdir.is_dir():
+            for p in sorted(rdir.glob("*.md")):
+                if f"{source}/routines/{p.name}" not in pages:
+                    p.unlink()
+            if not any(rdir.iterdir()):
+                rdir.rmdir()
         if not any(sub.iterdir()):
             sub.rmdir()
 
@@ -100,6 +109,11 @@ def _prune(hub: Path, keep: int) -> None:
     snaps = list_snapshots(hub)
     for sid in snaps[:-keep] if len(snaps) > keep else []:
         shutil.rmtree(snapshots_dir(hub) / sid, ignore_errors=True)
+    store = RoutineStore(hub)
+    if store.root.is_dir():  # bodies no retained snapshot references go with the snapshots that pointed at them
+        kept = [r for sid in list_snapshots(hub) for p in sorted((snapshots_dir(hub) / sid).glob("*.json"))
+                if (r := load_result(hub, sid, p.stem))]
+        store.prune(referenced_hashes(kept))
 
 
 def take_snapshot(
@@ -126,8 +140,10 @@ def take_snapshot(
                         break
             if good:
                 priors[s.name] = merge(good) if merge else good[0]
-    results = run_sources(chosen, query_fn=query_fn, priors=priors, deep=deep)
+    results = run_sources(chosen, query_fn=query_fn, priors=priors, deep=deep,
+                         routine_store=RoutineStore(hub))
 
+    snaps_before = list_snapshots(hub)
     now = now or datetime.now(timezone.utc)
     sid = now.strftime("%Y%m%dT%H%M%SZ")
     while (snapshots_dir(hub) / sid).exists():  # two runs in one second must not collide
@@ -138,6 +154,22 @@ def take_snapshot(
     plat = hub / "platform"
     plat.mkdir(exist_ok=True)
 
+    routine_store = RoutineStore(hub)
+    prev_results: dict[str, dict[str, Any]] = {}
+    edges_doc: dict[str, Any] | None = None
+    if do_render:
+        for r in results:
+            if (r.get("data") or {}).get("routines") is not None:
+                for psid in reversed(snaps_before):
+                    pr = load_result(hub, psid, r["source"])
+                    if pr and result_status(pr) != "failed" and (pr.get("data") or {}).get("routines") is not None:
+                        prev_results[r["source"]] = pr
+                        break
+        if prev_results or any((r.get("data") or {}).get("routines") is not None for r in results):
+            try:  # callers of a routine come from the last `dea scan`
+                edges_doc = json.loads((hub / "catalog" / "edges.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                edges_doc = None
     failed: list[str] = []
     for r in results:
         (sdir / f"{r['source']}.json").write_text(
@@ -146,7 +178,8 @@ def take_snapshot(
         if status == "failed":
             failed.append(r["source"])  # keep the last good platform page; never overwrite it with an error
         elif do_render:
-            _write_pages(plat, r["source"], render_pages(r))
+            _write_pages(plat, r["source"], render_pages(
+                r, prior=prev_results.get(r["source"]), store=routine_store, edges=edges_doc))
     if do_render:
         _write_index(hub, cfg, list_snapshots(hub))
         try:

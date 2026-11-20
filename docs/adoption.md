@@ -36,12 +36,17 @@ From one warehouse and one Airflow to a few hundred projects, without the hub tu
   integration page for each new cross-project edge). Airflow, dbt (point `target_dir` at the folder with `manifest.json`) and plain SQL are supported.
 - Fill project pages with what only a human knows: purpose, owners, gotchas. The header block is generated (`<!-- dea:generated -->`); do not edit it.
 - Add `status.md` rows for dated checks and work in progress; rows that are due are injected at session start.
+  Table headers `Due`/`Date`/`When` with `State`/`Status`; the date cell may be bold, italic or `~`-prefixed and carry trailing text. Under a
+  heading containing `dated`, `due` or `deadline`, list items starting with `YYYY-MM-DD` count too (struck-through or `- [x]` is done).
 - Add `conventions.md`: how things are built here, in a few lines.
 - Run `dea snapshot` daily (below) so the agent never works from stale state; a stale snapshot is flagged at session start.
 - Use `hub-sync` at the end of a work session: it proposes one diff for the hub, you accept or edit it.
 
 ## Scaling to hundreds of projects
 
+- **Map under another name.** If your hub already keeps its map elsewhere (and loads it through a CLAUDE.md import), set
+  `hub.map_file: _map.md` and `hub.session_map: false`: lint and `dea find` use that file, and the session hook stops injecting the map
+  a second time (due rows and stale-platform rows still arrive).
 - **Domains.** When `map.md` goes over its token budget (`dea lint` says so), split it by domain: `domains/<domain>.md` lists the
   projects of that domain (60 lines max), and `map.md` lists the domains. Lookups never walk the tree; `dea find` jumps to the page.
 - **Ownership.** Put `owner`, `domain`, `repo` and `tags` in each profile's frontmatter, and use `CODEOWNERS` so each domain's

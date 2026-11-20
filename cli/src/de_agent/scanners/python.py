@@ -79,7 +79,10 @@ def scan_py_text(src: str, rel: str, dialect: str) -> dict[str, Any]:
     try:
         text, sql_cells = databricks_cells(src) if kind == "notebook" else (src, [])
         res = _scan_python_source(text, rel, dialect)
-    except (SyntaxError, ValueError, RecursionError) as ex:
+    except RecursionError:
+        out["error"] = "recursion limit while evaluating loops"
+        return out
+    except (SyntaxError, ValueError) as ex:
         out["error"] = f"{type(ex).__name__}: {str(ex)[:80]}"
         return out
     except Exception as ex:  # a scanner bug on one file must not stop the scan

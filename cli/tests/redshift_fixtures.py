@@ -44,6 +44,38 @@ def healthy():
     a[rs.v_maintenance()[0].sql] = [
         {"operation": "vacuum", "runs": 14, "tables": 9, "last_at": "2026-10-19 09:30:00"},
         {"operation": "analyze", "runs": 22, "tables": 15, "last_at": "2026-10-19 09:45:00"}]
+    a.update(routines_answers())
+    return a
+
+
+PROC_BODY = "begin\n  delete from acme.daily_orders where d = current_date;\n  insert into acme.daily_orders select current_date, count(*) from acme.orders;\nend;"
+
+
+def routines_answers(limit=5000):
+    """Hand-built from the documented pg_proc_info / pg_proc / pg_views / svv_mv_info columns (fictional Acme objects)."""
+    a = {}
+    a[rs.v_routine_procs(limit)[0].sql] = [
+        {"schema": "acme", "name": "refresh_orders", "kind": "procedure", "args": "()", "language": "plpgsql", "returns": "",
+         "owner": "acme_etl", "definition": PROC_BODY, "argnames": None},
+        {"schema": "acme", "name": "load_day", "kind": "procedure", "args": "(date, integer)", "language": "plpgsql",
+         "returns": "", "owner": "acme_etl", "definition": "", "argnames": "d,batch"}]
+    a[rs.q_show_procedure("acme", "load_day", "(date, integer)").sql] = [
+        {"Show Procedure DDL": "CREATE OR REPLACE PROCEDURE acme.load_day(d date, batch integer)\nAS $$\nbegin\n  call acme.refresh_orders();\nend;\n$$ LANGUAGE plpgsql;"}]
+    a[rs.v_routine_udfs(limit)[0].sql] = [
+        {"schema": "acme", "name": "f_cents", "kind": "function", "args": "(numeric)", "language": "sql", "returns": "bigint",
+         "owner": "acme_etl", "definition": "select ($1 * 100)::bigint", "argnames": None},
+        {"schema": "acme", "name": "f_slug", "kind": "function", "args": "(character varying)", "language": "plpythonu",
+         "returns": "character varying", "owner": "acme_etl", "definition": "return a.lower()", "argnames": "{a}"}]
+    a[rs.v_routine_views(limit)[0].sql] = [
+        {"schema": "acme", "name": "v_open_orders", "kind": "view", "args": "", "language": "sql", "returns": "",
+         "owner": "acme_bi", "definition": "SELECT o.id FROM acme.orders o WHERE o.status = 'open'"},
+        {"schema": "acme", "name": "v_late", "kind": "view", "args": "", "language": "sql", "returns": "", "owner": "acme_bi",
+         "definition": "SELECT id FROM acme.orders WITH NO SCHEMA BINDING"},
+        {"schema": "acme", "name": "mv_daily", "kind": "view", "args": "", "language": "sql", "returns": "", "owner": "acme_bi",
+         "definition": "SELECT date_trunc('day', created_at) d, count(*) n FROM acme.orders GROUP BY 1"}]
+    a[rs.Q_ROUTINE_MVS.sql] = [{"schema": "acme", "name": "mv_daily", "owner": "acme_bi"},
+                               {"schema": "acme", "name": "mv_hidden", "owner": "acme_bi"}]
+    a[rs.q_mv_viewdef("acme", "mv_hidden").sql] = [{"definition": "SELECT 1 AS x FROM acme.customers"}]
     return a
 
 

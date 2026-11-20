@@ -1,15 +1,22 @@
 """SQL scanner (M1c section 2): objects defined per file and the tables each reads/writes."""
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
+from de_agent.routines import normalize_body
 from de_agent.scanners.common import analyze_sql, heuristic_sql
 
 DOLLAR_RE = re.compile(r"\$(\w*)\$(.*?)\$\1\$", re.S)
 HEADER_RE = re.compile(
     r"^\s*create\s+(?:or\s+replace\s+)?(?:(?:temp|temporary|unlogged|external|recursive|secure)\s+)*"
     r"(materialized\s+view|table|view|procedure|function)\s+(?:if\s+not\s+exists\s+)?([\w.\"$]+)", re.I)
+
+
+def body_fingerprint(bodies: list[str]) -> str:
+    """Hash of the normalized inner bodies: what repo-vs-live drift compares (engines rewrite headers and view text)."""
+    return hashlib.sha256("\n--\n".join(normalize_body(b) for b in bodies).encode("utf-8")).hexdigest()
 
 
 def _statements(text: str) -> list[tuple[str, int]]:
@@ -105,6 +112,8 @@ def scan_sql_text(text: str, rel: str, dialect: str) -> dict[str, Any]:
                 mm = re.search(r"\bas\s+'(.*)'\s*(?:language\b.*)?$", stmt, re.I | re.S)
                 bodies = [mm.group(1).replace("''", "'")] if mm else []
             flow = {"reads": [], "writes": [], "calls": [], "heuristic": False}
+            if bodies:
+                obj["body_hash"] = body_fingerprint(bodies)
             for b in bodies:
                 f = _body_flow(b, dialect)
                 for k in ("reads", "writes", "calls"):

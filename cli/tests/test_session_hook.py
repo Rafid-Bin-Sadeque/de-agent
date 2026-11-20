@@ -143,3 +143,34 @@ def test_query_log_truncates_sql_and_appends(tmp_path):
     run(QUERY_LOG, bash('psql -c "select 2"'), env_extra=env, cwd=tmp_path)
     rows = log_lines(tmp_path)
     assert len(rows) == 2 and len(rows[0]["sql"]) <= 300 and rows[0]["exit_status"] is None
+
+
+# ---------------- v0.3.1: map_file / session_map ----------------
+
+def _hub_setting(hub, setting):
+    cfg = hub / "de-agent.yaml"
+    cfg.write_text(cfg.read_text().replace("retention: 30}", f"retention: 30, {setting}}}", 1))
+
+
+def test_session_map_default_injects_map(example_hub):
+    out = context(run(SESSION, {"cwd": str(example_hub)}, hub=example_hub))
+    assert (example_hub / "map.md").read_text().strip()[:40] in out
+
+
+def test_map_file_override_is_injected(example_hub):
+    (example_hub / "map.md").rename(example_hub / "atlas.md")
+    (example_hub / "atlas.md").write_text("# Atlas\n\nunique-atlas-marker\n")
+    _hub_setting(example_hub, "map_file: atlas.md")
+    assert "unique-atlas-marker" in context(run(SESSION, {"cwd": str(example_hub)}, hub=example_hub))
+
+
+def test_session_map_false_skips_map_but_keeps_due_and_footer(example_hub):
+    today = date.today()
+    hub_with_status(example_hub, f"| {today - timedelta(days=1)} | verify load | todo |\n")
+    marker = "unique-map-marker"
+    (example_hub / "map.md").write_text(f"# Map\n\n{marker}\n")
+    _hub_setting(example_hub, "session_map: false")
+    out = context(run(SESSION, {"cwd": str(example_hub)}, hub=example_hub))
+    assert marker not in out
+    assert "OVERDUE" in out and "verify load" in out
+    assert "dea find" in out

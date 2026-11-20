@@ -8,6 +8,8 @@ from typing import Any
 
 from de_agent.collectors import get_collector
 from de_agent.render import human_bytes, human_duration, signals_for
+from de_agent.routines import RoutineStore
+from de_agent.routines_render import fence_for
 from de_agent.runner import result_status
 from de_agent.snapshot import list_snapshots, load_result, snapshots_dir
 
@@ -74,10 +76,12 @@ def _key(row: dict[str, Any], keys: list[str]) -> tuple[Any, ...]:
 
 
 def _key_label(k: tuple[Any, ...]) -> str:
-    return ".".join(str(x) for x in k)
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", ".".join(str(x) for x in k))  # a remote identifier must not add lines to the report
 
 
 def _row_hint(row: dict[str, Any]) -> str:
+    if "body_hash" in row and row.get("kind"):  # a routine row
+        return f" ({row['kind']})"
     bits = []
     for f, v in row.items():
         if f.endswith("_bytes") and _is_num(v):
@@ -123,8 +127,28 @@ def _dbt_recovery(od: dict[str, Any], nd: dict[str, Any], out: dict[str, Any]) -
 FAIL_STATUSES = {"fail", "error", "failed"}
 
 
-def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
-    """Structured diff of two results of the same source."""
+HUNK_MAX_LINES = 80
+
+
+def routine_hunk(store: Any, old_hash: str, new_hash: str) -> list[str]:
+    """Unified diff of two stored routine bodies, at most HUNK_MAX_LINES lines then `... N more lines`."""
+    import difflib
+
+    if store is None:
+        return []
+    old = store.get(old_hash) if old_hash else None
+    new = store.get(new_hash) if new_hash else None
+    if old is None or new is None:
+        return ["(a body is not in the store: no hunk)"]
+    lines = list(difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=3))
+    lines = [ln for ln in lines if not ln.startswith(("--- ", "+++ "))]
+    if len(lines) > HUNK_MAX_LINES:
+        return [*lines[:HUNK_MAX_LINES], f"... {len(lines) - HUNK_MAX_LINES} more lines"]
+    return lines
+
+
+def diff_results(old: dict[str, Any], new: dict[str, Any], store: Any = None) -> dict[str, Any]:
+    """Structured diff of two results of the same source. `store`: the routine body store (unified diffs of changed routines)."""
     collector = get_collector(new["type"])
     volatile = set(getattr(collector, "volatile_fields", set()))
     keys_for = getattr(collector, "list_keys_for", None)  # pack collectors: the pack decides keys and volatile fields
@@ -167,6 +191,8 @@ def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
 
     estimated = set((od.get("meta") or {}).get("sizes_estimated") or []) | \
         set((nd.get("meta") or {}).get("sizes_estimated") or [])
+    capped = {"dms_table_mappings"} & (set((od.get("meta") or {}).get("truncated") or []) |
+                                       set((nd.get("meta") or {}).get("truncated") or []))
     for section, keys in list_keys.items():
         if section not in od or section not in nd or section in skip:
             continue
@@ -183,10 +209,26 @@ def diff_results(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
         for k in sorted(orows.keys() & nrows.keys(), key=str):
             fields = sorted((set(orows[k]) | set(nrows[k])) - set(keys) - vol)
             ch = [c for f in fields if (c := _change(f, orows[k].get(f), nrows[k].get(f)))]
+            hunk: list[str] = []
+            if section == "routines":
+                # A body missing on one side (view text skipped on lock timeout, a degraded Redshift read) is unknown,
+                # not a change: otherwise one degraded snapshot reports every view as changed, twice.
+                ch = [c for c in ch if not (c["field"] == "body_hash" and not (c["old"] and c["new"]))]
+                for c in ch:
+                    if c["field"] == "body_hash":
+                        c["text"] = f"body changed ({str(c['old'] or '-')[:8]} -> {str(c['new'] or '-')[:8]})"
+                        hunk = routine_hunk(store, str(c["old"] or ""), str(c["new"] or ""))
             if ch:
-                changed.append({"key": _key_label(k), "changes": ch})
+                changed.append({"key": _key_label(k), "changes": ch, **({"hunk": hunk} if hunk else {})})
+        partial = section in capped
+        if partial:  # a capped or degraded list drops rows it still has: absence is not removal
+            removed = []
         if added or removed or changed:
             out["lists"][section] = {"added": added, "removed": removed, "changed": changed}
+        if section == "dms_table_mappings" and not partial and (nrows.keys() ^ orows.keys()):
+            plus, minus = nrows.keys() - orows.keys(), orows.keys() - nrows.keys()
+            tasks = sorted({str(k[0]) for k in plus | minus})
+            out["signals_new"].append(f"DMS mappings: +{len(plus)} / -{len(minus)} table(s) in {', '.join(tasks)}")
 
     for section in sorted(set(od) & set(nd)):
         o, n = od[section], nd[section]
@@ -254,7 +296,7 @@ def build_diff(hub: Path, source: str | None = None, since: str | None = None) -
             old_id = usable[-2]
         old, new = _usable(hub, old_id, name), _usable(hub, new_id, name)
         assert old and new
-        d = diff_results(old, new)
+        d = diff_results(old, new, RoutineStore(hub))
         d.update(status="same" if _empty(d) else "changed", old_id=old_id, new_id=new_id,
                  old_at=old["collected_at"], new_at=new["collected_at"],
                  age=human_duration((_parse(new["collected_at"]) - _parse(old["collected_at"])).total_seconds()))
@@ -262,16 +304,22 @@ def build_diff(hub: Path, source: str | None = None, since: str | None = None) -
     return report
 
 
+LIVE_HINT = ("`dea diff` compares the last two snapshots, not the live platform: to see what changed since the latest "
+             "snapshot, take a new one (`dea snapshot`) and run `dea diff` again.")
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     srcs = report["sources"]
     compared = {n: d for n, d in srcs.items() if d["status"] in ("same", "changed")}
     if not compared:
-        return "No earlier snapshot to compare against yet.\n"
+        return ("No earlier snapshot to compare against yet.\n"
+                f"{LIVE_HINT}\n")
     olds = {d["old_at"] for d in compared.values()}
     first = next(iter(compared.values()))
     since = f"{first['old_at'].replace('T', ' ').rstrip('Z')[:16]} UTC ({first['age']})"
     if all(d["status"] == "same" for d in compared.values()):
-        return f"No changes since {since}.\n" if len(olds) == 1 else "No changes since the previous snapshot.\n"
+        head = f"No changes since {since}.\n" if len(olds) == 1 else "No changes since the previous snapshot.\n"
+        return head + f"{LIVE_HINT}\n"
     lines = [f"# What changed since {since}" if len(olds) == 1 else "# What changed", ""]
     for name, d in compared.items():
         lines.append(f"## {name}" + ("" if len(olds) == 1 else f" (since {d['old_at']}, {d['age']})"))
@@ -295,5 +343,9 @@ def render_markdown(report: dict[str, Any]) -> str:
                 lines.append(f"- {section}: removed {r['text']}")
             for r in ch["changed"]:
                 lines.append(f"- {section} {r['key']}: " + "; ".join(c["text"] for c in r["changes"]))
+                if r.get("hunk"):
+                    text = "\n".join(r["hunk"])
+                    fence = fence_for(text)
+                    lines += [f"{fence}diff", text, fence]
         lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"

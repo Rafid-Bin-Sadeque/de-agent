@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, "_vendor"), os.path.join(os.path.dirname(HERE), "cli", "src")]
+sys.path.insert(0, HERE)
+from _guardlib import find_hub  # noqa: E402
 
 
 def exit_status(resp):
@@ -39,6 +41,7 @@ def main():
         if not pairs:
             return
         project = os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or "."
+        project = find_hub(project) or project
         status = exit_status(data.get("tool_response"))
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         lines = []

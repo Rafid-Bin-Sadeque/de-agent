@@ -18,7 +18,7 @@ sys.path[:0] = [HERE, os.path.join(os.path.dirname(HERE), "cli", "src")]
 from _guardlib import input_too_large  # noqa: E402
 
 URI_RE = re.compile(r"\b(postgres(ql)?|redshift|mysql|mariadb|mongodb(\+srv)?)://[^:/\s@]+:[^@\s]+@", re.I)
-PASSWORD_KV = re.compile(r"\bpassword=[^\s'\"&]+", re.I)
+PASSWORD_KV = re.compile(r"\bpassword=([^\s'\"&]+)", re.I)
 ASSIGN_RE = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<val>.+)$", re.S)
 SECRET_ENV = re.compile(r"^(PGPASSWORD|MYSQL_PWD|AWS_SECRET_ACCESS_KEY|.*(PASSWORD|PASSWD).*)$", re.I)
 DSN_HINT = re.compile(r"\b(host|dbname|user|port)=|\?", re.I)
@@ -26,6 +26,11 @@ try:
     from de_agent.clients import DB_CLIENTS
 except Exception:  # fail closed in main(): without the shared list nothing is checked
     DB_CLIENTS = None
+try:  # the same "not a literal" exemptions lint uses, so hook and lint cannot drift
+    from de_agent.secretscan import _CODE_REF, _PLACEHOLDER
+except Exception:  # no package (system python): inline copies of de_agent.secretscan
+    _PLACEHOLDER = re.compile(r"^(\$\{?\w+\}?|<[^>]*>|\{\{.*\}\}|\*+|x{3,}|%s|env:\w+|pgpass|none)$", re.I)
+    _CODE_REF = re.compile(r"^[A-Za-z_][\w.]*\s*[\[(]")
 SCRIPT_RUNNERS = ("python", "node", "ruby", "perl", "php")
 READERS = {
     "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "rg", "sed", "awk", "bat",
@@ -268,6 +273,45 @@ def check_python(command: str, cwd) -> str | None:
     return None
 
 
+# Heredoc readers whose body is data (program text or input), not shell. Anything else (bash, sh, ssh, eval,
+# source, an unknown wrapper) keeps the body in the shell-shape rules.
+DATA_READERS = (
+    "python", "node", "ruby", "perl", "php", "cat", "tee", "sort", "uniq", "wc", "head", "tail", "grep", "egrep", "fgrep",
+    "rg", "sed", "awk", "jq", "yq", "cut", "tr", "diff", "git", "dea", "sqlite3", "duckdb",
+)
+HEREDOC_REF = re.compile(r"__DEA_HEREDOC_(\d+)__")
+
+
+def shell_shape_commands(command: str) -> list[list[str]]:
+    """Simple commands for the shell-shape rules (env_dump): heredoc bodies count only when a shell reads them."""
+    try:
+        from de_agent.extract import _preprocess
+
+        text, bodies = _preprocess(command)
+        top = simple_commands(text)
+    except Exception:  # unparseable: strictest view (the whole text, bodies included)
+        return simple_commands(command)
+    cmds = list(top)
+    for words in top:
+        for j, w in enumerate(words[:-1]):
+            m = HEREDOC_REF.fullmatch(words[j + 1]) if w == "<<" else None
+            if not m or int(m.group(1)) >= len(bodies):
+                continue
+            i = 0
+            while i < len(words) and (ASSIGN_RE.match(words[i]) or words[i] in WRAPPERS):
+                i += 1
+            reader = os.path.basename(words[i]) if i < len(words) else ""
+            is_db = DB_CLIENTS is not None and reader in DB_CLIENTS
+            if not (is_db or reader.startswith(DATA_READERS)):
+                cmds += simple_commands(bodies[int(m.group(1))])
+    return cmds
+
+
+def literal_password(word: str) -> bool:
+    """True when `word` carries password=<literal>; code references (cfg['pw'], os.getenv(...)) and placeholders pass."""
+    return any(not (_PLACEHOLDER.match(m.group(1)) or _CODE_REF.match(m.group(1))) for m in PASSWORD_KV.finditer(word))
+
+
 def check_bash(command: str, cwd=None) -> str | None:
     if URI_RE.search(command):
         return "password inside a connection URI"
@@ -275,7 +319,11 @@ def check_bash(command: str, cwd=None) -> str | None:
         cmds = simple_commands(command)
     except ValueError:
         cmds = [command.split()]
-    for words in cmds:
+    try:
+        shell_cmds = shell_shape_commands(command)
+    except ValueError:
+        shell_cmds = cmds
+    for words in shell_cmds:
         why = env_dump(words)
         if why:
             return why
@@ -295,7 +343,7 @@ def check_bash(command: str, cwd=None) -> str | None:
     client = uses_db_client(cmds)
     for words in cmds:
         for w in words:
-            if PASSWORD_KV.search(w) and (client or DSN_HINT.search(w)):
+            if literal_password(w) and (client or DSN_HINT.search(w)):
                 return "inline password= in a DSN or client command"
     for words in cmds:
         i = 0

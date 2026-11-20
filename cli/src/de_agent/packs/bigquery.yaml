@@ -65,3 +65,17 @@ sections:
       - rows: "count > 0"
         message: "{count} table(s) not modified for 7 days (expected to be fresh? narrow `datasets`)"
         severity: info
+  - name: routines
+    sql: |
+      select routine_schema as `schema`, routine_name as name,
+             case routine_type when 'PROCEDURE' then 'procedure' else 'function' end as kind,
+             '' as args, lower(coalesce(external_language, 'sql')) as language, coalesce(lower(data_type), '') as returns,
+             '' as owner, routine_definition as definition
+      from `region-{{region}}`.INFORMATION_SCHEMA.ROUTINES
+      where routine_schema in :datasets
+      union all
+      select table_schema, table_name, 'view', '', 'sql', '', '', view_definition
+      from `region-{{region}}`.INFORMATION_SCHEMA.VIEWS
+      where table_schema in :datasets
+    key: [schema, name, args]
+    columns: [schema, name, kind, args, language, returns, owner, definition]

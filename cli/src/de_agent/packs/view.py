@@ -46,6 +46,11 @@ def body(data: dict[str, Any]) -> list[str]:
         if name not in data:
             continue
         rows = data[name] or []
+        if name == "routines":  # the reserved v0.3 section: summary block, one page per routine
+            from de_agent.routines_render import routines_block
+
+            out += routines_block(rows, meta, data.get("_routine_changes"), bool(data.get("_routine_pages")))
+            continue
         out += [f"## {_title(name, spec)}", ""]
         if not rows:
             out += ["none", ""]

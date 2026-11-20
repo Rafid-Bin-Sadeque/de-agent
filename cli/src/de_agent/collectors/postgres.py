@@ -8,6 +8,14 @@ import re
 from typing import Any, Callable
 
 from de_agent.collectors.base import CollectorError, RunContext
+from de_agent.routines import (
+    KINDS,
+    ROUTINE_OPTION_KEYS,
+    finalize_rows,
+    routine_settings,
+    validate_routine_options,
+)
+from de_agent.scanners.routines import make_parser
 
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 XID_MAX = 2_147_483_647
@@ -16,7 +24,7 @@ SETTINGS = (
     "idle_in_transaction_session_timeout",
 )
 DEFAULT_LONG_QUERY_S = 300
-OPTION_KEYS = {"schemas", "top_tables", "long_query_seconds"}
+OPTION_KEYS = {"schemas", "top_tables", "long_query_seconds"} | ROUTINE_OPTION_KEYS
 
 
 def validate_options(options: dict[str, Any]) -> None:
@@ -29,6 +37,7 @@ def validate_options(options: dict[str, Any]) -> None:
     for key in ("top_tables", "long_query_seconds"):
         if key in options and not (isinstance(options[key], int) and options[key] > 0):
             raise ValueError(f"options.{key} must be a positive integer")
+    validate_routine_options(options)
 
 
 def validate_source(source: Any) -> None:
@@ -112,8 +121,8 @@ order by 3 desc, 1
 def q_tables_nolock(schemas: list[str], top: int) -> str:
     return f"""
 select s.schemaname as "schema", s.relname as name,
-       (c.relpages * 8192)::bigint as total_bytes,
-       (c.relpages * 8192)::bigint as table_bytes,
+       (c.relpages::bigint * 8192) as total_bytes,
+       (c.relpages::bigint * 8192) as table_bytes,
        null::bigint as index_bytes,
        s.n_live_tup, s.n_dead_tup,
        round(100.0 * s.n_dead_tup / nullif(s.n_live_tup + s.n_dead_tup, 0), 1) as dead_pct,
@@ -180,6 +189,58 @@ def q_settings() -> str:
     return f"select name, reset_val as setting, unit from pg_settings where name in ({names}) order by 1"
 
 
+def q_routines(schemas: list[str], kinds: list[str], max_rows: int, view_bodies: bool = True) -> str:
+    """Procedures, functions, views, materialized views and triggers in one UNION ALL (v0.3 section 2.1).
+
+    Aggregates and window functions are skipped (prokind p/f only); extension-owned objects (pg_depend deptype e)
+    are excluded; `internal`/`c` functions keep language and an empty body. Reads definitions only, never calls them.
+    pg_get_viewdef() locks the relations a view reads, so it queues behind an ACCESS EXCLUSIVE lock on them:
+    `view_bodies=False` (the lock-timeout fallback) lists views without their text."""
+    ext = "not exists (select 1 from pg_depend d where d.classid = '{cls}'::regclass and d.objid = {oid} and d.deptype = 'e')"
+    parts: list[str] = []
+    if "procedure" in kinds or "function" in kinds:
+        codes = ", ".join(repr(c) for k, c in (("procedure", "p"), ("function", "f")) if k in kinds)
+        parts.append(f"""
+select n.nspname::text as "schema", p.proname::text as name,
+       case p.prokind when 'p' then 'procedure' else 'function' end as kind,
+       '(' || oidvectortypes(p.proargtypes) || ')' as args,
+       l.lanname::text as language,
+       coalesce(pg_get_function_result(p.oid), '') as returns,
+       pg_get_userbyid(p.proowner)::text as owner,
+       case when l.lanname in ('internal', 'c') then '' else pg_get_functiondef(p.oid) end as def
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+join pg_language l on l.oid = p.prolang
+where p.prokind in ({codes}) and {_schema_filter('n.nspname', schemas)}
+  and {ext.format(cls='pg_proc', oid='p.oid')}""")
+    if "view" in kinds or "materialized_view" in kinds:
+        rk = ", ".join(repr(c) for k, c in (("view", "v"), ("materialized_view", "m")) if k in kinds)
+        parts.append(f"""
+select n.nspname::text, c.relname::text,
+       case c.relkind when 'm' then 'materialized_view' else 'view' end,
+       '', 'sql', '', pg_get_userbyid(c.relowner)::text, {'pg_get_viewdef(c.oid)' if view_bodies else "''"}
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where c.relkind in ({rk}) and {_schema_filter('n.nspname', schemas)}
+  and {ext.format(cls='pg_class', oid='c.oid')}""")
+    if "trigger" in kinds:
+        parts.append(f"""
+select n.nspname::text, t.tgname::text, 'trigger', 'on ' || c.relname::text, '', '',
+       pg_get_userbyid(c.relowner)::text, pg_get_triggerdef(t.oid)
+from pg_trigger t
+join pg_class c on c.oid = t.tgrelid
+join pg_namespace n on n.oid = c.relnamespace
+where not t.tgisinternal and {_schema_filter('n.nspname', schemas)}""")
+    body = "\nunion all".join(parts)
+    return f"""
+select "schema", name, kind, args, language, returns, owner, octet_length(def) as body_bytes, def as definition
+from ({body}
+) r("schema", name, kind, args, language, returns, owner, def)
+order by 1, 2, 4, 3
+limit {int(max_rows) + 1}
+"""
+
+
 Q_HAS_PSS = "select 1 as present from pg_extension where extname = 'pg_stat_statements'"
 
 
@@ -214,10 +275,12 @@ class PostgresCollector:
         "blocking": ["blocked_pid", "blocker_pid"],
         "replication_slots": ["slot_name"],
         "settings": ["name"],
+        "routines": ["schema", "name", "args"],
     }
     volatile_fields = {
         "last_autovacuum", "last_autoanalyze", "seq_scan", "idx_scan", "duration_s", "wait_s",
-        "state", "wait_event", "query", "blocked_query", "blocker_query",
+        "state", "wait_event", "query", "blocked_query", "blocker_query", "owner",
+        "reads", "writes", "calls", "parse", "body_bytes",
     }
     validate_options = staticmethod(validate_options)
     validate_source = staticmethod(validate_source)
@@ -268,7 +331,25 @@ class PostgresCollector:
         run("replication_slots", q_slots())
         run("settings", q_settings())
         self._statements(source, ctx, data)
+        self._routines(source, ctx, data, errors, schemas)
         return {"data": data, "errors": errors}
+
+    def _routines(self, source: Any, ctx: RunContext, data: dict[str, Any], errors: list[str], schemas: list[str]) -> None:
+        cfg = routine_settings(source.options)
+        if not cfg["enabled"]:
+            return
+        kinds = [k for k in KINDS if k in cfg["kinds"]]
+        try:
+            try:
+                raw = ctx.query(source, q_routines(schemas, kinds, cfg["max_rows"]))
+            except CollectorError as ex:
+                if "lock timeout" not in str(ex) or not ({"view", "materialized_view"} & set(kinds)):
+                    raise
+                raw = ctx.query(source, q_routines(schemas, kinds, cfg["max_rows"], view_bodies=False))
+                data["meta"]["routine_view_bodies_skipped"] = True
+            data["routines"] = finalize_rows(raw, source.options, ctx.routine_store, parser=make_parser("postgres"))
+        except (CollectorError, ValueError) as ex:
+            errors.append(f"routines: {ex}")
 
     def _statements(self, source: Any, ctx: RunContext, data: dict[str, Any]) -> None:
         """Optional section: silently skipped when pg_stat_statements is absent or not loaded."""

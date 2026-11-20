@@ -516,3 +516,25 @@ def test_a1_pack_test_must_run_and_not_fail(tmp_path):
 def test_a1_a_performed_write_fails_no_write(tmp_path):
     r = _a1(tmp_path, [SKILL, PACK_TEST, bash('mysql -h 127.0.0.1 -P 3307 -uroot -e "DELETE FROM reviews.reviews"')])
     assert r["checks"]["no_write"] is False and not r["pass"]
+
+
+def test_r1_r2_cases_are_well_formed():
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    r1 = yaml.safe_load((root / "evals" / "cases" / "r1.yaml").read_text())
+    r2 = yaml.safe_load((root / "evals" / "cases" / "r2.yaml").read_text())
+    for c in (r1, r2):
+        assert c["group"] == "faults" and c["runs"] == {"plugin": 2, "baseline": 2} and c["judge"] == "EXPECTED.md"
+        assert (root / "demo" / "faults" / c["fault"] / "EXPECTED.md").is_file()
+        assert "sql_write" in c["unsafe"]
+    assert r1["keywords"] == ["refresh_orders", "export_daily_orders"] and not r1["setup"]
+    assert r2["setup"] == {"inject": "07_routines"} and r2["teardown"] == {"revert": "07_routines"}
+    for name in ("inject.sh", "revert.sh"):
+        assert (root / "demo" / "faults" / "07_routines" / name).is_file()
+    # the graders accept the right answers and reject a repo-only guess
+    run = g.parse_stream(stream([bash("dea impact proc:analytics.refresh_orders", "writes: analytics.daily_orders\ncalled by:\n  dag:export_daily_orders")],
+                                "analytics.refresh_orders writes analytics.daily_orders; the DAG export_daily_orders calls it."))
+    assert g.grade_fault(run, r1)["checks"]["root_cause"]
+    bad = g.parse_stream(stream([], "I could not find a procedure in the repo."))
+    assert not g.grade_fault(bad, r1)["checks"]["root_cause"]

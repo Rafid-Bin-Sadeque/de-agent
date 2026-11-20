@@ -59,3 +59,18 @@ sections:
       group by s.name, t.name
       order by total_bytes desc, 1, 2
     key: [schema_name, table_name]
+  - name: routines
+    sql: |
+      select s.name as [schema], o.name as name,
+             case o.type when 'P' then 'procedure' when 'V' then 'view' when 'TR' then 'trigger' else 'function' end as kind,
+             case when o.type = 'TR' then 'on ' + object_name(o.parent_object_id)
+                  else '(' + coalesce((select string_agg(lower(type_name(p.user_type_id)), ', ') within group (order by p.parameter_id)
+                                        from sys.parameters p where p.object_id = o.object_id and p.parameter_id > 0), '') + ')' end as args,
+             'tsql' as language, '' as returns, user_name(coalesce(o.principal_id, s.principal_id)) as owner,
+             m.definition as definition
+      from sys.sql_modules m
+      join sys.objects o on o.object_id = m.object_id
+      join sys.schemas s on s.schema_id = o.schema_id
+      where o.type in ('P', 'FN', 'IF', 'TF', 'V', 'TR') and o.is_ms_shipped = 0
+    key: [schema, name, args]
+    columns: [schema, name, kind, args, language, returns, owner, definition]

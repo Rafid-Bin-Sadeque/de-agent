@@ -8,6 +8,10 @@ NOW = "2026-10-01T12:00:00Z"
 
 FIXTURES = {
     "postgres-lite": {"options": {}, "responses": {
+        "routines": [
+            {"schema": "shop", "name": "refresh_orders", "kind": "procedure", "args": "()", "language": "plpgsql", "returns": "", "owner": "etl_user", "body_bytes": 120, "definition": "CREATE OR REPLACE PROCEDURE shop.refresh_orders()\n LANGUAGE plpgsql\nAS $procedure$\nbegin\n  insert into shop.daily_orders select current_date, count(*) from shop.orders;\nend;\n$procedure$"},
+            {"schema": "shop", "name": "order_total", "kind": "function", "args": "(integer)", "language": "sql", "returns": "numeric", "owner": "etl_user", "body_bytes": 90, "definition": "CREATE OR REPLACE FUNCTION shop.order_total(integer)\n RETURNS numeric\n LANGUAGE sql\nAS $function$ select sum(amount) from shop.orders where customer_id = $1 $function$"},
+            {"schema": "shop", "name": "big_orders", "kind": "view", "args": "", "language": "sql", "returns": "", "owner": "etl_user", "body_bytes": 70, "definition": " SELECT id, amount\n   FROM shop.orders\n  WHERE amount > 100;"}],
         "long_running_sessions": [
             {"pid": 4101, "user": "etl_user", "state": "active", "wait_event_type": "IO", "duration_s": 5400, "query": "select count(*) from shop.orders o join shop.items i on i.order_id = o.id"},
             {"pid": 4102, "user": "bi_reader", "state": "active", "wait_event_type": None, "duration_s": 420, "query": "select * from shop.customers"}],
@@ -20,6 +24,11 @@ FIXTURES = {
             {"schema": "shop", "table": "orders", "est_bytes": 524288000, "est_rows": 180000},
             {"schema": "shop", "table": "customers", "est_bytes": 41943040, "est_rows": 120000}]}},
     "mysql": {"options": {}, "responses": {
+        "routines": [
+            {"schema": "shop", "name": "refresh_orders", "kind": "procedure", "args": "()", "language": "sql", "returns": "", "owner": "etl@%", "definition": "BEGIN\n  INSERT INTO daily_orders SELECT CURDATE(), COUNT(*) FROM orders;\nEND"},
+            {"schema": "shop", "name": "order_total", "kind": "function", "args": "(int)", "language": "sql", "returns": "decimal(10,2)", "owner": "etl@%", "definition": None},
+            {"schema": "shop", "name": "big_orders", "kind": "view", "args": "", "language": "sql", "returns": "", "owner": "etl@%", "definition": "select `shop`.`orders`.`id` AS `id` from `shop`.`orders` where (`shop`.`orders`.`amount` > 100)"},
+            {"schema": "shop", "name": "orders_ai", "kind": "trigger", "args": "on orders", "language": "sql", "returns": "", "owner": "etl@%", "definition": "SET NEW.created_at = NOW()"}],
         "long_processlist": [{"id": 88, "user": "etl", "db": "shop", "command": "Query", "seconds": 640, "state": "executing", "info": "select sleep(700)"}],
         "innodb_lock_waits": [{"wait_age_secs": 12, "locked_table": "`shop`.`orders`", "waiting_pid": 91, "blocking_pid": 88, "waiting_query": "update orders set note = 'a'", "blocking_query": None}],
         "replica_status": [{"Source_Host": "db-primary.example.internal", "Replica_IO_Running": "Yes", "Replica_SQL_Running": "No", "Seconds_Behind_Source": None, "Last_IO_Error": "", "Last_SQL_Error": "Duplicate entry '7' for key 'PRIMARY'"}],
@@ -27,6 +36,10 @@ FIXTURES = {
             {"table_schema": "shop", "table_name": "orders", "total_bytes": 83886080, "approx_rows": 250000},
             {"table_schema": "shop", "table_name": "reviews", "total_bytes": 16384000, "approx_rows": 40000}]}},
     "snowflake": {"options": {"warehouses": ["ANALYTICS_WH", "LOAD_WH"], "databases": ["SHOP_DB"]}, "responses": {
+        "routines": [
+            {"schema": "SHOP_DB.PUBLIC", "name": "REFRESH_ORDERS", "kind": "procedure", "args": "()", "language": "sql", "returns": "varchar", "owner": "ETL_ROLE", "definition": "BEGIN\n  INSERT INTO DAILY_ORDERS SELECT CURRENT_DATE, COUNT(*) FROM ORDERS;\n  RETURN 'ok';\nEND"},
+            {"schema": "SHOP_DB.PUBLIC", "name": "F_CENTS", "kind": "function", "args": "(a number)", "language": "sql", "returns": "number", "owner": "ETL_ROLE", "definition": "a * 100"},
+            {"schema": "SHOP_DB.PUBLIC", "name": "V_BIG_ORDERS", "kind": "view", "args": "", "language": "sql", "returns": "", "owner": "ETL_ROLE", "definition": "create view V_BIG_ORDERS as select ID from ORDERS where AMOUNT > 100;"}],
         "warehouses": [
             {"name": "ANALYTICS_WH", "state": "STARTED", "type": "STANDARD", "size": "Medium", "auto_suspend": 600, "running": 2, "queued": 0},
             {"name": "LOAD_WH", "state": "SUSPENDED", "type": "STANDARD", "size": "Small", "auto_suspend": 0, "running": 0, "queued": 0}],
@@ -39,6 +52,10 @@ FIXTURES = {
         "pipe_failures_24h": [{"pipe_name": "SHOP_DB.PUBLIC.ORDERS_PIPE", "table_name": "ORDERS_RAW", "file_name": "orders/2026/10/01/part-0007.csv", "status": "Load failed", "first_error_message": "Numeric value 'abc' is not recognized", "last_load_time": "2026-10-01T06:30:00Z"}],
         "top_storage_tables": [{"table_catalog": "SHOP_DB", "table_schema": "PUBLIC", "table_name": "ORDERS_RAW", "active_bytes": 9663676416, "time_travel_bytes": 1073741824, "failsafe_bytes": 536870912}]}},
     "bigquery": {"options": {"region": "eu", "datasets": ["shop_dw"]}, "responses": {
+        "routines": [
+            {"schema": "shop_dw", "name": "refresh_orders", "kind": "procedure", "args": "", "language": "sql", "returns": "", "owner": "", "definition": "BEGIN\n  INSERT INTO shop_dw.daily_orders SELECT CURRENT_DATE(), COUNT(*) FROM shop_dw.orders;\nEND"},
+            {"schema": "shop_dw", "name": "f_cents", "kind": "function", "args": "", "language": "js", "returns": "float64", "owner": "", "definition": "return x * 100;"},
+            {"schema": "shop_dw", "name": "v_big_orders", "kind": "view", "args": "", "language": "sql", "returns": "", "owner": "", "definition": "SELECT id FROM shop_dw.orders WHERE amount > 100"}],
         "job_failures_24h": [
             {"job_id": "bquxjob_1a2b", "user_email": "etl@example-shop.iam.gserviceaccount.com", "reason": "quotaExceeded", "message": "Quota exceeded: too many concurrent queries", "creation_time": "2026-10-01T05:00:00Z"},
             {"job_id": "bquxjob_3c4d", "user_email": "analyst@example.com", "reason": "invalidQuery", "message": "Unrecognized name: revenue at [3:8]", "creation_time": "2026-10-01T08:30:00Z"}],
@@ -49,10 +66,18 @@ FIXTURES = {
         "largest_tables": [{"table_schema": "shop_dw", "table_name": "fct_orders", "total_logical_bytes": 214748364800, "active_logical_bytes": 161061273600}],
         "stale_tables": [{"table_schema": "shop_dw", "table_name": "dim_promo_2024", "storage_last_modified_time": "2026-09-12T00:00:00Z"}]}},
     "databricks-system": {"options": {"workspace_id": "1234567890123456"}, "responses": {
+        "routines": [
+            {"schema": "main.shop", "name": "f_cents", "kind": "function", "args": "", "language": "sql", "returns": "bigint", "owner": "", "definition": "RETURN x * 100"},
+            {"schema": "main.shop", "name": "v_big_orders", "kind": "view", "args": "", "language": "sql", "returns": "", "owner": "", "definition": "SELECT id FROM main.shop.orders WHERE amount > 100"}],
         "job_failures_24h": [{"job_id": 701, "run_id": 90001, "result_state": "FAILED", "termination_code": "RUN_EXECUTION_ERROR", "period_start_time": "2026-10-01T02:00:00Z"}],
         "usage_24h": [{"sku_name": "STANDARD_JOBS_COMPUTE", "usage_unit": "DBU", "usage_quantity": 412.5}, {"sku_name": "PREMIUM_SQL_COMPUTE", "usage_unit": "DBU", "usage_quantity": 96.0}],
         "failed_statements_24h": [{"statement_id": "01ef-aaaa-0001", "executed_by": "analyst@example.com", "error_message": "[TABLE_OR_VIEW_NOT_FOUND] The table or view `shop`.`orders_v3` cannot be found", "start_time": "2026-10-01T10:05:00Z"}]}},
     "mssql": {"options": {}, "responses": {
+        "routines": [
+            {"schema": "dbo", "name": "RefreshOrders", "kind": "procedure", "args": "()", "language": "tsql", "returns": "", "owner": "dbo", "definition": "CREATE PROCEDURE dbo.RefreshOrders AS\nBEGIN\n  INSERT INTO dbo.DailyOrders SELECT CAST(GETDATE() AS date), COUNT(*) FROM dbo.Orders;\nEND"},
+            {"schema": "dbo", "name": "fn_Cents", "kind": "function", "args": "(decimal)", "language": "tsql", "returns": "", "owner": "dbo", "definition": "CREATE FUNCTION dbo.fn_Cents(@a decimal(10,2)) RETURNS bigint AS BEGIN RETURN @a * 100 END"},
+            {"schema": "dbo", "name": "vBigOrders", "kind": "view", "args": "()", "language": "tsql", "returns": "", "owner": "dbo", "definition": "CREATE VIEW dbo.vBigOrders AS SELECT Id FROM dbo.Orders WHERE Amount > 100"},
+            {"schema": "dbo", "name": "trg_Orders_Ins", "kind": "trigger", "args": "on Orders", "language": "tsql", "returns": "", "owner": "dbo", "definition": "CREATE TRIGGER dbo.trg_Orders_Ins ON dbo.Orders AFTER INSERT AS UPDATE dbo.Orders SET Touched = 1"}],
         "blocking_chains": [{"blocked_session": 61, "blocker_session": 55, "wait_type": "LCK_M_X", "wait_s": 420, "database_name": "ShopDb"}],
         "long_requests": [{"session_id": 55, "status": "suspended", "command": "UPDATE", "elapsed_s": 1260, "database_name": "ShopDb", "statement": "update dbo.Orders set Status = 2 where CreatedAt < '2026-01-01'"}],
         "agent_job_failures_24h": [{"job_name": "Nightly Orders Load", "run_status": 0, "message": "The job failed. The Job was invoked by Schedule 4 (Nightly).", "run_at": "2026-10-01T01:00:00Z"}],

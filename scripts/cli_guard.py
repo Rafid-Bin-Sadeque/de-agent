@@ -19,7 +19,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, "_vendor"), os.path.join(os.path.dirname(HERE), "cli", "src")]
 sys.path.insert(0, HERE)
-from _guardlib import MAX_RAW, TOO_LARGE, guard_block, input_too_large, parse_cli_allow  # noqa: E402
+from _guardlib import MAX_RAW, TOO_LARGE, find_hub, guard_block, input_too_large, parse_cli_allow  # noqa: E402
 
 
 def emit(decision: str, reason: str) -> None:
@@ -53,6 +53,7 @@ def check(data: dict):
     except Exception as ex:
         return "deny", f"de-agent guard error: {ex}"
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or "."
+    project_dir = find_hub(project_dir) or project_dir
     mode, allow = read_config(project_dir)
     verdicts = classify_command(command, data.get("cwd"), allow)
     bad = first_denial(verdicts)

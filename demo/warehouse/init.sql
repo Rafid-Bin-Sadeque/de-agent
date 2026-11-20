@@ -29,3 +29,49 @@ INSERT INTO raw._watermarks (table_name) VALUES ('customers'), ('products'), ('o
 ALTER TABLE raw.customers OWNER TO etl; ALTER TABLE raw.products OWNER TO etl; ALTER TABLE raw.orders OWNER TO etl;
 ALTER TABLE raw.order_items OWNER TO etl; ALTER TABLE raw.events OWNER TO etl; ALTER TABLE raw._watermarks OWNER TO etl;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw TO readonly_agent;
+
+-- Routines (v0.3 demo): one plpgsql procedure writing analytics.daily_orders, a SQL function, a view and a trigger.
+-- The export_daily_orders DAG runs `CALL analytics.refresh_orders()`; `dea impact raw.orders` walks table -> procedure -> DAG.
+CREATE TABLE analytics.daily_orders (
+  order_date date PRIMARY KEY,
+  orders integer NOT NULL,
+  revenue numeric(14,2) NOT NULL,
+  refreshed_at timestamptz
+);
+ALTER TABLE analytics.daily_orders OWNER TO etl;
+GRANT SELECT ON analytics.daily_orders TO readonly_agent;
+
+CREATE FUNCTION analytics.order_total(p_order_id integer) RETURNS numeric
+LANGUAGE sql STABLE AS $$
+  SELECT coalesce(sum(quantity * unit_price), 0) FROM raw.order_items WHERE order_id = p_order_id
+$$;
+
+CREATE VIEW analytics.v_open_orders AS
+  SELECT id, customer_id, total_amount, created_at FROM raw.orders WHERE status = 'open';
+
+CREATE FUNCTION analytics.daily_orders_stamp() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.refreshed_at := now();
+  RETURN NEW;
+END
+$$;
+
+CREATE TRIGGER daily_orders_stamp BEFORE INSERT OR UPDATE ON analytics.daily_orders
+  FOR EACH ROW EXECUTE FUNCTION analytics.daily_orders_stamp();
+
+CREATE PROCEDURE analytics.refresh_orders()
+LANGUAGE plpgsql AS $$
+BEGIN
+  DELETE FROM analytics.daily_orders WHERE order_date = current_date;
+  INSERT INTO analytics.daily_orders (order_date, orders, revenue)
+  SELECT current_date, count(*), coalesce(sum(total_amount), 0)
+  FROM raw.orders
+  WHERE created_at >= current_date;
+END
+$$;
+
+ALTER FUNCTION analytics.order_total(integer) OWNER TO etl;
+ALTER VIEW analytics.v_open_orders OWNER TO etl;
+ALTER FUNCTION analytics.daily_orders_stamp() OWNER TO etl;
+ALTER PROCEDURE analytics.refresh_orders() OWNER TO etl;

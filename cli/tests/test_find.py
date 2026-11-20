@@ -71,6 +71,13 @@ def test_kinds(hub):
     assert kinds.get("map.md") == "map"
 
 
+def test_map_file_override_is_kind_map(hub):
+    (hub / "map.md").rename(hub / "atlas.md")
+    (hub / "de-agent.yaml").write_text("version: 1\nhub:\n  map_file: atlas.md\n")
+    kinds = {h.path: h.kind for h in find(hub, "projects")}
+    assert kinds.get("atlas.md") == "map"
+
+
 def test_incremental_reindex(hub):
     idx = FindIndex(hub)
     assert idx.refresh() == 4

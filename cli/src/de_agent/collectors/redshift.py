@@ -21,11 +21,22 @@ from datetime import datetime, timezone
 from typing import Any
 
 from de_agent.collectors.base import CollectorError, RunContext, utc_iso
+from de_agent.routines import (
+    KINDS,
+    ROUTINE_OPTION_KEYS,
+    finalize_rows,
+    routine_settings,
+    validate_routine_options,
+)
+from de_agent.scanners.routines import make_parser
 
 OPTION_KEYS = {"top_tables", "top_queries", "section_timeout_seconds", "long_txn_seconds", "heavy_ttl_h",
-               "heavy_section_timeout_s", "light"}
+               "heavy_section_timeout_s", "light", "routines_ttl_h"} | ROUTINE_OPTION_KEYS
 DEFAULT_SECTION_TIMEOUT_S = 60
 DEFAULT_HEAVY_TTL_H = 6
+DEFAULT_ROUTINES_TTL_H = 24
+SHOW_PROC_CAP = 200  # per-procedure SHOW PROCEDURE fallbacks per snapshot
+MV_VIEWDEF_CAP = 200
 SINGLE_PASS_CAP = 50_000
 SPILL_DETAIL_TIMEOUT_S = 45
 DEFAULT_HEAVY_TIMEOUT_S = 300
@@ -47,7 +58,8 @@ def validate_options(options: dict[str, Any]) -> None:
         raise ValueError(f"unknown redshift options: {', '.join(sorted(unknown))}")
     if "light" in options and not isinstance(options["light"], bool):
         raise ValueError("options.light must be true or false")
-    for key in OPTION_KEYS - {"light"}:
+    validate_routine_options(options)
+    for key in OPTION_KEYS - {"light"} - ROUTINE_OPTION_KEYS:
         if key in options and not (isinstance(options[key], int) and not isinstance(options[key], bool)
                                    and options[key] > 0):
             raise ValueError(f"options.{key} must be a positive integer")
@@ -445,9 +457,107 @@ from stl_analyze where starttime >= {SINCE} and status = 'Full'""", types),
     ]
 
 
+# ---- routines (v0.3 section 2.2): leader-node catalogs only, each in its own statement (never joined to a compute-node table)
+# Live-checked 2026-11-08 (RA3 cluster): text[] cannot be cast to varchar on Redshift, so argnames come via array_to_string.
+_USER_SCHEMAS = "left(n.nspname, 3) <> 'pg_' and n.nspname <> 'information_schema'"
+
+
+def v_routine_procs(limit: int) -> list[Variant]:
+    cols = f"""
+select n.nspname as "schema", p.proname as name, 'procedure' as kind,
+       '(' || oidvectortypes(p.proargtypes) || ')' as args, l.lanname as language, '' as returns,
+       trim(u.usename) as owner, p.prosrc as definition, array_to_string(p.proargnames, ',') as argnames
+from pg_proc_info p
+join pg_namespace n on n.oid = p.pronamespace
+join pg_language l on l.oid = p.prolang
+left join pg_user u on u.usesysid = p.proowner
+where p.prokind = 'p' and {_USER_SCHEMAS}
+order by 1, 2, 4
+limit {int(limit) + 1}"""
+    return [Variant("pg_proc_info", cols),
+            # no oidvectortypes(): overloads collapse into one key but the section still works
+            Variant("pg_proc_info (no arg types)", cols.replace("'(' || oidvectortypes(p.proargtypes) || ')'", "'()'"))]
+
+
+def v_routine_udfs(limit: int) -> list[Variant]:
+    return [Variant("pg_proc", f"""
+select n.nspname as "schema", p.proname as name, 'function' as kind,
+       '(' || oidvectortypes(p.proargtypes) || ')' as args, l.lanname as language,
+       format_type(p.prorettype, null) as returns, trim(u.usename) as owner, p.prosrc as definition,
+       array_to_string(p.proargnames, ',') as argnames
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+join pg_language l on l.oid = p.prolang
+left join pg_user u on u.usesysid = p.proowner
+where l.lanname in ('sql', 'plpythonu', 'exfunc') and {_USER_SCHEMAS}
+order by 1, 2, 4
+limit {int(limit) + 1}""")]
+
+
+def v_routine_views(limit: int) -> list[Variant]:
+    return [Variant("pg_views", f"""
+select v.schemaname as "schema", v.viewname as name, 'view' as kind, '' as args, 'sql' as language, '' as returns,
+       trim(v.viewowner) as owner, v.definition as definition
+from pg_views v
+where left(v.schemaname, 3) <> 'pg_' and v.schemaname <> 'information_schema'
+order by 1, 2
+limit {int(limit) + 1}""")]
+
+
+Q_ROUTINE_MVS = Variant("svv_mv_info", """
+select trim(schema_name) as "schema", trim(name) as name, trim(user_name) as owner
+from svv_mv_info
+order by 1, 2""")
+
+
+def _qi(ident: str) -> str:
+    return '"' + str(ident).replace('"', '""') + '"'
+
+
+def q_show_procedure(schema: str, name: str, argtypes: str) -> Variant:
+    """`SHOW PROCEDURE` (a read) for one procedure whose prosrc came back empty. argtypes: the `(integer, text)` signature."""
+    return Variant("show procedure", f"show procedure {_qi(schema)}.{_qi(name)}{argtypes}")
+
+
+def q_mv_viewdef(schema: str, name: str) -> Variant:
+    lit = f"{_qi(schema)}.{_qi(name)}".replace("'", "''")
+    return Variant("pg_get_viewdef", f"select pg_get_viewdef('{lit}'::regclass, true) as definition")
+
+
+def _argnames(value: Any) -> list[str]:
+    """`a,b` (array_to_string), `{a,b}` (an array rendered as text) or a list -> ['a', 'b']; empty when there are none."""
+    if isinstance(value, (list, tuple)):
+        return [str(x).strip() for x in value if str(x or "").strip()]
+    t = str(value or "").strip()
+    if t.startswith("{") and t.endswith("}"):
+        t = t[1:-1]
+    return [x.strip().strip('"') for x in t.split(",") if x.strip()]
+
+
+def _header(row: dict[str, Any]) -> str:
+    """CREATE header rebuilt from name + argument names/types (Redshift keeps only the body in prosrc)."""
+    types = [t.strip() for t in str(row.get("args") or "()")[1:-1].split(",") if t.strip()]
+    names = _argnames(row.get("argnames"))
+    sig = ", ".join(f"{names[i]} {t}" if i < len(names) and names[i] else t for i, t in enumerate(types))
+    kind = "PROCEDURE" if row.get("kind") == "procedure" else "FUNCTION"
+    ret = f" RETURNS {row['returns']}" if row.get("returns") else ""
+    return f"CREATE OR REPLACE {kind} {row['schema']}.{row['name']}({sig}){ret}"
+
+
+def _with_header(row: dict[str, Any]) -> str:
+    body = str(row.get("definition") or "")
+    if not body.strip():
+        return ""
+    lang = str(row.get("language") or "")
+    return f"{_header(row)}\nAS $$\n{body.strip(chr(10))}\n$$ LANGUAGE {lang};"
+
+
 def all_queries(top_tables: int = 50, top_queries: int = 15, long_txn_s: int = DEFAULT_LONG_TXN_S) -> list[Variant]:
     """Every SQL the collector can send (used by the tests: each must parse as redshift and classify as a read)."""
-    out = [Q_VERSION, Q_SLICES, Q_SERVERLESS, Q_USERNAMES]
+    out = [Q_VERSION, Q_SLICES, Q_SERVERLESS, Q_USERNAMES, Q_ROUTINE_MVS, q_show_procedure("acme", "refresh", "(integer)"),
+           q_mv_viewdef("acme", "mv_orders")]
+    for group in (v_routine_procs(5000), v_routine_udfs(5000), v_routine_views(5000)):
+        out += group
     out += [v_single_pass(), v_top_text(["abc123"]), Q_MINQID]
     for group in (v_users(), v_types(), v_totals(), v_top_queries(top_queries), v_spill(), v_spill(1), v_commit_queue(),
                   v_concurrency(), v_alerts(), q_tables(top_tables), v_blocked(), q_long_txns(long_txn_s),
@@ -469,14 +579,15 @@ class RedshiftCollector:
         "workload_users": ["user"], "workload_types": ["query_type"], "top_queries": ["key"],
         "concurrency_24h": ["hour"], "alert_events": ["event"], "tables": ["schema", "name"],
         "locks": ["kind", "pid"], "load_errors_24h": ["table", "column", "error"], "maintenance": ["operation"],
+        "routines": ["schema", "name", "args"],
     }
     windowed_sections = {"concurrency_24h", "alert_events", "load_errors_24h"}
-    heavy_sections = set(WORKLOAD_SECTIONS) | {"pressure_spill"}
+    heavy_sections = set(WORKLOAD_SECTIONS) | {"pressure_spill", "routines"}
     ranking_sections = {"top_queries", "workload_users", "workload_types"}
     volatile_fields = {
         "query", "exec_s", "share_pct", "query_count", "n", "total_exec_s", "avg_exec_s", "max_exec_s", "last_at",
         "wait_s", "age_s", "peak", "runs", "unsorted_pct", "stats_off", "skew_rows", "queries", "queue_p50_s",
-        "spilled_queries", "spilled_mb", "commit_queue_p95_s",
+        "spilled_queries", "spilled_mb", "commit_queue_p95_s", "owner", "reads", "writes", "calls", "parse", "body_bytes",
     }
     validate_options = staticmethod(validate_options)
     validate_source = staticmethod(validate_source)
@@ -485,7 +596,7 @@ class RedshiftCollector:
     def reused_data(data: dict[str, Any]) -> tuple[set[str], dict[str, set[str]]]:
         """(data keys, {data key: fields}) that this result copied from an earlier snapshot: nothing new was observed there."""
         secs = (data.get("meta") or {}).get("sections") or {}
-        keys = {n for n in WORKLOAD_SECTIONS if (secs.get(n) or {}).get("cached_from")}
+        keys = {n for n in (*WORKLOAD_SECTIONS, "routines") if (secs.get(n) or {}).get("cached_from")}
         fields = {"pressure_24h": {"spilled_queries", "spilled_mb"}} if (secs.get("pressure_spill") or {}).get("cached_from") else {}
         return keys, fields
 
@@ -511,6 +622,10 @@ class RedshiftCollector:
                     for k in ("min_query_id", "workload_truncated"):
                         if k in (od.get("meta") or {}) and n == "workload_24h":
                             meta[k] = od["meta"][k]
+            if not (secs.get("routines") or {}).get("source") and (osecs.get("routines") or {}).get("source") \
+                    and "routines" in od:
+                data["routines"] = od["routines"]
+                secs["routines"] = osecs["routines"]
             if not (secs.get("pressure_spill") or {}).get("source") and (osecs.get("pressure_spill") or {}).get("source") \
                     and "spilled_queries" in (od.get("pressure_24h") or {}):
                 secs["pressure_spill"] = osecs["pressure_spill"]
@@ -577,7 +692,7 @@ class RedshiftCollector:
         prior_data = (ctx.prior or {}).get("data") or {} if not ctx.deep else {}
         prior_secs = (prior_data.get("meta") or {}).get("sections") or {}
 
-        def reusable(names: tuple[str, ...], present: bool) -> dict[str, dict[str, Any]] | None:
+        def reusable(names: tuple[str, ...], present: bool, ttl: float | None = None) -> dict[str, dict[str, Any]] | None:
             """Prior section meta for every name when all were computed successfully under `ttl_h` ago, else None."""
             if not present:
                 return None
@@ -589,7 +704,7 @@ class RedshiftCollector:
                 except ValueError:
                     return None
                 age = (now - comp).total_seconds() / 3600.0
-                if not s or s.get("source") is None or age < 0 or age >= ttl_h:
+                if not s or s.get("source") is None or age < 0 or age >= (ttl_h if ttl is None else ttl):
                     return None
                 out[n] = {"source": s["source"], "seconds": 0, "computed_at": s["computed_at"],
                           "cached_from": s["computed_at"], "cached_age_h": round(age, 1)}
@@ -747,6 +862,19 @@ class RedshiftCollector:
             {"operation": x.get("operation"), "runs": x.get("runs"), "tables": x.get("tables"), "last_at": x.get("last_at")}
             for x in r])
 
+        r_cfg = routine_settings(opts)
+        if r_cfg["enabled"]:
+            r_ttl = float(opts.get("routines_ttl_h", DEFAULT_ROUTINES_TTL_H))
+            r_cached = reusable(("routines",), isinstance(prior_data.get("routines"), list), ttl=r_ttl)
+            if r_cached:
+                data["routines"] = prior_data["routines"]
+                sections.update(r_cached)
+                for k in ("routine_view_bodies_skipped", "routines_mv_unavailable", "routines_mv_bodies_missing"):
+                    if k in (prior_data.get("meta") or {}):
+                        meta_extra[k] = prior_data["meta"][k]
+            else:
+                self._routines(source, ctx, opts, data, errors, sections, meta_extra, sect_t)
+
         if "cluster" not in data and not any(
                 k != "cluster" and s.get("source") and not s.get("cached_from") for k, s in sections.items()):
             # nothing could be read live (cluster down): reused sections alone must not turn that into a usable snapshot
@@ -759,6 +887,105 @@ class RedshiftCollector:
                         **({"min_query_id": min_qid} if min_qid is not None else {}),
                         "sections": dict(sorted(sections.items()))}
         return {"data": data, "errors": errors}
+
+    def _routines(self, source: Any, ctx: RunContext, opts: dict[str, Any], data: dict[str, Any], errors: list[str],
+                  sections: dict[str, dict[str, Any]], meta_extra: dict[str, Any], sect_t: int) -> None:
+        """Procedures, UDFs, views, materialized views (v0.3 section 2.2). All-or-nothing for the core catalogs: a missing
+        kind would show up as a mass "removed" in the next diff."""
+        cfg = routine_settings(opts)
+        kinds = set(cfg["kinds"])
+        limit = cfg["max_rows"]
+        t0 = time.monotonic()
+        raw: list[dict[str, Any]] = []
+        used: list[str] = []
+
+        def first(variants: list[Variant]) -> list[dict[str, Any]]:
+            fails: list[str] = []
+            for v in variants:
+                try:
+                    rows = self._q(source, ctx, v, sect_t)
+                except CollectorError as ex:
+                    fails.append(f"{v.source}: {ex}")
+                    continue
+                used.append(v.source)
+                return rows
+            raise CollectorError("; ".join(fails))
+
+        try:
+            if "procedure" in kinds:
+                procs = first(v_routine_procs(limit))
+                shows = 0
+                for r in procs:
+                    if not str(r.get("definition") or "").strip() and shows < SHOW_PROC_CAP \
+                            and re.fullmatch(r"\([\w ,.\[\]()$]*\)", str(r.get("args") or "()")):  # a type name with `;` or quotes is never spliced into SQL
+                        shows += 1
+                        try:  # prosrc empty: SHOW PROCEDURE returns the full DDL (a SHOW, classified read)
+                            out = self._q(source, ctx, q_show_procedure(r["schema"], r["name"], str(r.get("args") or "()")), sect_t)
+                            txt = next(iter(out[0].values()), "") if out else ""
+                            if txt:
+                                r["definition"] = str(txt)
+                                r["argnames"] = None
+                                r["_full"] = True
+                        except CollectorError:
+                            pass
+                for r in procs:
+                    if not r.pop("_full", False):
+                        r["definition"] = _with_header(r)
+                raw += procs
+            if "function" in kinds:
+                udfs = first(v_routine_udfs(limit))
+                for r in udfs:
+                    r["definition"] = _with_header(r)
+                raw += udfs
+            views: list[dict[str, Any]] = []
+            if kinds & {"view", "materialized_view"}:
+                views = first(v_routine_views(limit))
+        except CollectorError as ex:
+            errors.append(f"routines: {ex}")
+            sections["routines"] = {"source": None, "seconds": round(time.monotonic() - t0, 2)}
+            return
+        if kinds & {"view", "materialized_view"}:
+            mvs: dict[tuple[str, str], dict[str, Any]] = {}
+            try:
+                for m in self._q(source, ctx, Q_ROUTINE_MVS, sect_t):
+                    mvs[(str(m.get("schema")), str(m.get("name")))] = m
+                used.append("svv_mv_info")
+            except CollectorError:
+                meta_extra["routines_mv_unavailable"] = True  # kind stays `view` for these: a documented degrade
+            seen: set[tuple[str, str]] = set()
+            for v in views:
+                key = (str(v.get("schema")), str(v.get("name")))
+                if key in mvs:
+                    seen.add(key)
+                    v["kind"] = "materialized_view"
+                    v["owner"] = v.get("owner") or mvs[key].get("owner")
+                raw.append(v)
+            missing = 0
+            for key, m in sorted(mvs.items()):  # an MV that pg_views does not list: ask pg_get_viewdef, else name-only
+                if key in seen:
+                    continue
+                body = ""
+                if missing < MV_VIEWDEF_CAP:
+                    try:
+                        out = self._q(source, ctx, q_mv_viewdef(*key), sect_t)
+                        body = str((out[0] if out else {}).get("definition") or "")
+                    except CollectorError:
+                        body = ""
+                if not body:
+                    missing += 1
+                raw.append({"schema": key[0], "name": key[1], "kind": "materialized_view", "args": "", "language": "sql",
+                            "returns": "", "owner": m.get("owner") or "", "definition": body})
+            if missing:
+                meta_extra["routines_mv_bodies_missing"] = missing
+        try:
+            data["routines"] = finalize_rows([r for r in raw if r.get("kind") in KINDS], opts, ctx.routine_store,
+                                         parser=make_parser("redshift"))
+        except ValueError as ex:
+            errors.append(f"routines: {ex}")
+            sections["routines"] = {"source": None, "seconds": round(time.monotonic() - t0, 2)}
+            return
+        sections["routines"] = {"source": "+".join(dict.fromkeys(used)), "seconds": round(time.monotonic() - t0, 2),
+                                "computed_at": utc_iso(ctx.now)}
 
     def _cluster(self, source: Any, ctx: RunContext, data: dict[str, Any], errors: list[str],
                  sections: dict[str, dict[str, Any]], sect_t: int) -> None:

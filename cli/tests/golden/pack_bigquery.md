@@ -48,3 +48,12 @@ _Pack `bigquery` v1, sql, validated: fixtures (fixtures only: not yet run agains
 | table_schema | table_name | storage_last_modified_time |
 |---|---|---|
 | shop_dw | dim_promo_2024 | 2026-09-12T00:00:00Z |
+
+## Routines
+
+| schema | procedure | function | view | total |
+|---|---|---|---|---|
+| shop_dw | 1 | 1 | 1 | 3 |
+
+- parse coverage: full 2, heuristic 0, none 1
+- truncated: 0, redacted: 0, without a body: 0

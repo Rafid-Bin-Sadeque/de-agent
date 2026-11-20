@@ -5,6 +5,98 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-19
+
+Hook false positives, DMS table mappings in the aws collector, and help keeping snapshots fresh. No config breaking changes.
+
+### Added
+- aws collector: section `dms_table_mappings`, one row per (task, source schema, source table) that a task's selection rules include,
+  with `target_schema`/`target_table` after `rename`, `convert-lowercase`/`-uppercase`, `add-`/`remove-prefix`/`-suffix` rules, the
+  rule that matched (`explicit` or `wildcard <schema>.<table>`; a wildcard matching nothing stays as one `(unresolved)` row) and the
+  source/target endpoint ids. `dea diff` lists added and removed tables and raises `DMS mappings: +a / -r table(s) in <tasks>`; a
+  target table written by two tasks is a warn signal. Capped by `options.dms_mappings_max` (default 5000). When a task's table
+  statistics cannot be read the section is marked truncated and `dea diff` reports no removals from it.
+- `dea export dms-mappings [--csv PATH] [--source NAME]`: the section from the latest snapshot as CSV. Read-only, no AWS call.
+- `dea schedule print [--at HH:MM] [--sources a,b]`: prints a launchd plist (macOS) or crontab line that runs `dea snapshot` daily
+  with `DEA_HUB` set and a rotated log in `<hub>/.dea/logs/`. Prints only; you install it. The session stale-snapshot row points to it.
+
+### Fixed
+- secret_guard: a heredoc body is data unless a shell reads it (`python3 - <<EOF ... set(...)` was refused as "prints shell
+  variables"). Python bodies still go through the credential-file check; heredocs into `bash`/`sh`/`ssh` are unchanged.
+- secret_guard: `password=` followed by a code reference (`cfg['password']`, `os.environ[...]`, `os.getenv(...)`) or a placeholder
+  is no longer refused; the hook uses lint's exemption (one shared test table keeps them in step). Literals stay blocked.
+- self_guard: interpreter code (`python3 - <<EOF`, `python -c`, `node -e`, ...) that writes and quotes a path under the plugin's
+  hooks, scripts, agents, skills or `cli/src` is denied like an Edit (it went through before). Outside `DEA_ALLOW_PLUGIN_EDITS=1`
+  sessions, a writing script run from the plugin checkout that merely reads a protected path is also refused (fails closed).
+- self_guard: a python command that only mentions `de-agent.yaml` in prose is no longer refused; it must name it as a path (argument
+  or quoted path literal).
+- test_guard: a glob such as `*.yml` in script text no longer counts as a dbt test because some dbt project sits below the folder;
+  script-text paths must be inside a dbt project.
+
+## [0.3.1] - 2026-11-10
+
+One hub for every session: fixes found when a single hub serves Claude sessions opened in many different repo folders.
+
+### Added
+- `hub.map_file` (default `map.md`) and `hub.session_map` (default `true`): a hub that keeps its map under another name, or already
+  loads it through a CLAUDE.md import, no longer gets `map is missing` lint errors or a doubly injected map. Lint, `dea find` and the
+  session hook honour both; due rows, stale-platform rows and the footer are still injected when `session_map` is false.
+- `status.md` due dates: header synonyms `Due`/`Date`/`When` with `State`/`Status`; the date cell may carry emphasis (`**`, `_`, `~~`),
+  a leading `~` and trailing text; dated list items under a heading containing `dated`, `due` or `deadline` count too (struck-through
+  or `- [x]` is done). The session hook and `dea lint` share one rule.
+
+- The Airflow scanner follows module-level config constants a DAG imports (`from cfg import MART_PROCEDURES`, or `cfg.MART_PROCEDURES`)
+  and turns the strings under `proc`/`procedure`/`sp`/`stored_procedure`/`routine`/`function` keys into `calls` edges
+  (`via: config:<module>.<NAME>`), so live routine pages list those DAGs under "Called by". Literals only (f-strings are counted in
+  `dynamic_config_entries`), 2,000 entries per constant, modules outside the scanned repo ignored. Existing scan caches are rebuilt once.
+
+### Fixed
+- The SQL, CLI and query-log hooks resolved `de-agent.yaml` and approved plans from the session folder, so a session opened in a repo
+  silently fell back to `strict` and no approved plans. They now find the hub the way the CLI does (`DEA_HUB`, nearest `de-agent.yaml`
+  upward, `~/.config/de-agent/config.yaml`). Path-based guards are unchanged. With no hub at all behaviour is as before.
+- Lint: pages in `projects/<name>/` are topic pages, not profiles (no `profile-frontmatter` or `orphan-project`); a `password=` value
+  that is a code reference (`CREDS["password"]`, `os.environ[...]`, `os.getenv(...)`) is not a secret; a map file named `_map.md` is
+  indexed for the orphan check.
+- Generated profile headers omit cross-project edges whose table is in `edges.ignore_tables`.
+- Postgres collector: the no-lock tables fallback computed sizes with 32-bit page math and failed with an integer overflow on tables
+  over 2 GB; it now uses `bigint`.
+
+## [0.3.0] - 2026-11-08
+
+### Added
+- Routines: procedures, functions, views, materialized views and triggers from every SQL engine. A reserved `routines` section
+  (Postgres, Redshift and the `postgres-lite`, `mysql`, `snowflake`, `mssql`, `bigquery` and `databricks-system` packs) with a row
+  contract, redaction before anything is written (`DEA_DENYLIST_FILE` honoured), a content-addressed body store `.dea/routines/` pruned with
+  the snapshots, and the options `routines`, `routine_kinds`, `routines_max`, `routines_max_bytes`. Redshift reuses routines for
+  `routines_ttl_h` (24) hours unless `--deep`.
+- `dea scan` parses routine bodies (cached by `body_hash`) into the lineage graph: `proc:`/`function:`/`view:`/`trigger:` nodes,
+  `edges.calls`, a scan option `connections:` (Airflow `conn_id` to source) for `CALL` resolution, and a repo-vs-live drift warning.
+- `dea impact proc:<schema.name>` (and `function:`, `view:`, `trigger:`); `dea impact <table>` names the DAGs that call each routine.
+- `platform/<source>.md` gets a Routines summary; one page per routine under `platform/<source>/routines/`; `dea diff` prints a unified
+  diff of a changed body (80 lines at most).
+- Demo: a plpgsql procedure, a SQL function, a view and a trigger in the warehouse, called by a DAG.
+- docs/routines.md; routine privileges in docs/read-only-access.md.
+
+### Changed
+- `dea diff` says that it compares snapshots, not the live platform, and to take one first (`dea snapshot`) when it has nothing to
+  compare or found no change.
+
+### Fixed
+- Found in the live check (one RDS PostgreSQL, one RA3 Redshift cluster):
+  - Redshift routines failed with `cannot cast type text[] to character varying`; argument names now come via `array_to_string`.
+  - Temp tables a routine creates (`CREATE TEMP TABLE`, `SELECT ... INTO TEMP`, `#name`) became tables in the routine's schema; they are
+    now left out of the graph (`PARSER_VERSION` 2 re-parses cached routines).
+  - A secret key word inside a string literal (`'reset-password' THEN 'Password Reset'`) was redacted; without a `=`/`:` separator the
+    key must now be followed by whitespace (`PASSWORD 'x'`).
+- A routine body missing on one side of a diff (view text skipped on a lock timeout) is unknown, not changed.
+
+## [0.2.5] - 2026-11-05
+
+### Fixed
+- 0.2.5 — fix: dea scan crashed with RecursionError on loops over range() with non-constant arguments. The evaluator's
+  `range` branch no longer falls back into itself, and a RecursionError in one file is now recorded as a scan error for
+  that file instead of aborting the scan.
+
 ## [0.2.4] - 2026-11-03
 
 ### Fixed

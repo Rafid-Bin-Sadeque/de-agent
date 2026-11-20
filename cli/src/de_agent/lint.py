@@ -59,6 +59,12 @@ def _pages(hub: Path) -> list[Path]:
     return out
 
 
+def _is_topic_page(hub: Path, p: Path) -> bool:
+    """A page in projects/<name>/ (any depth below projects/): a topic page of that profile, not a profile itself."""
+    parts = p.relative_to(hub).parts
+    return len(parts) > 2 and parts[0] == "projects"
+
+
 def _is_catalog(hub: Path, p: Path) -> bool:
     return p.relative_to(hub).parts[0] == "catalog"
 
@@ -119,20 +125,78 @@ def _to_date(v: Any) -> date | None:
     return None
 
 
+DATE_HEADS = ("due", "date", "when")
+STATE_HEADS = ("state", "status")
+LEAD_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})(?!\d)")
+HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$")
+DATED_HEADING_RE = re.compile(r"dated|due|deadline", re.I)
+BULLET_RE = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(.*)$")
+TASK_RE = re.compile(r"^\[([ xX])\]\s+(.*)$")
+
+
+def lead_date(cell: str) -> date | None:
+    """Leading YYYY-MM-DD of a cell after stripping markdown emphasis and a leading `~` (same rule as the session hook)."""
+    t = re.sub(r"\*\*|__|~~|[*_]", "", cell).strip().lstrip("~").strip()
+    m = LEAD_DATE_RE.match(t)
+    if not m:
+        return None
+    try:
+        return date.fromisoformat(m.group(1))
+    except ValueError:
+        return None
+
+
+def _bullet_item(line: str) -> tuple[str, bool] | None:
+    m = BULLET_RE.match(line)
+    if not m:
+        return None
+    text = m.group(1).strip()
+    checked = False
+    t = TASK_RE.match(text)
+    if t:
+        checked = t.group(1) in "xX"
+        text = t.group(2).strip()
+    if lead_date(text) is None:
+        return None
+    struck = len(text) > 4 and text.startswith("~~") and text.endswith("~~") and "~~" not in text[2:-2]
+    return text, checked or struck
+
+
 def status_rows(text: str, today: date) -> list[dict[str, Any]]:
-    """Rows of tables that have a `Due` (or `Date`) and a `State` column."""
-    rows = []
-    for header, cells in table_rows(text):
-        low = [h.lower() for h in header]
-        di = next((k for k, h in enumerate(low) if h in ("due", "date")), None)
-        si = next((k for k, h in enumerate(low) if h in ("state", "status")), None)
-        if di is None or si is None or len(cells) <= max(di, si):
+    """Dated rows of status.md: table rows (Due/Date/When + State/Status columns) and dated list items under a
+    heading matching dated|due|deadline. Same parse rule as the session hook."""
+    rows: list[dict[str, Any]] = []
+    lines = text.splitlines()
+    i = 0
+    dated_section = False
+    while i < len(lines):
+        if lines[i].lstrip().startswith("|") and i + 1 < len(lines) and re.match(r"^\s*\|[\s:|-]+\|\s*$", lines[i + 1]):
+            low = [c.strip().lower() for c in lines[i].strip().strip("|").split("|")]
+            di = next((k for k, h in enumerate(low) if h in DATE_HEADS), None)
+            si = next((k for k, h in enumerate(low) if h in STATE_HEADS), None)
+            i += 2
+            while i < len(lines) and lines[i].lstrip().startswith("|"):
+                cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                i += 1
+                if di is None or si is None or len(cells) <= max(di, si):
+                    continue
+                d = lead_date(cells[di])
+                if d is None:
+                    continue
+                done = cells[si].strip().lower() in DONE_STATES
+                rows.append({"due": d, "state": cells[si], "done": done, "cells": cells, "overdue": d < today and not done})
             continue
-        d = _to_date(cells[di])
-        if d is None:
-            continue
-        done = cells[si].strip().lower() in DONE_STATES
-        rows.append({"due": d, "state": cells[si], "done": done, "cells": cells, "overdue": d < today and not done})
+        h = HEADING_RE.match(lines[i])
+        if h:
+            dated_section = bool(DATED_HEADING_RE.search(h.group(1)))
+        elif dated_section:
+            item = _bullet_item(lines[i])
+            if item:
+                d = lead_date(item[0])
+                if d is not None:
+                    rows.append({"due": d, "state": "done" if item[1] else "", "done": item[1], "cells": [item[0][:100]],
+                                 "overdue": d < today and not item[1]})
+        i += 1
     return rows
 
 
@@ -161,14 +225,15 @@ def run_lint(hub: Path, today: date | None = None, now: datetime | None = None) 
     real = lambda ps: [p for p in ps if not p.name.startswith("_")]  # noqa: E731  (skip _template.md)
 
     # map-budget
-    map_path = hub / "map.md"
+    map_name = cfg.hub.map_file
+    map_path = hub / map_name
     if not map_path.exists():
-        out.append(Finding("map-budget", "error", "map.md", "map.md is missing"))
+        out.append(Finding("map-budget", "error", map_name, f"{map_name} is missing"))
     else:
         tokens = (len(_read(map_path)) + 3) // 4
         if tokens > cfg.hub.map_budget_tokens:
-            out.append(Finding("map-budget", "error", "map.md",
-                               f"map.md is ~{tokens} tokens, budget {cfg.hub.map_budget_tokens}; split it by domain"))
+            out.append(Finding("map-budget", "error", map_name,
+                               f"{map_name} is ~{tokens} tokens, budget {cfg.hub.map_budget_tokens}; split it by domain"))
 
     # generated-markers: a start marker without an end marker (or vice versa) would corrupt the next `dea scan`
     for p in real(by_dir.get("projects", [])):
@@ -197,11 +262,12 @@ def run_lint(hub: Path, today: date | None = None, now: datetime | None = None) 
             if name.split("/")[-1].removesuffix(".md") not in stems:
                 out.append(Finding("broken-link", "error", _rel(hub, p), f"[[{name}]] does not resolve to a hub page"))
 
-    # orphan-project
-    profiles = {p.stem for p in real(by_dir.get("projects", []))}
+    # orphan-project (topic pages in projects/<name>/ are not profiles)
+    profile_pages = [p for p in real(by_dir.get("projects", [])) if not _is_topic_page(hub, p)]
+    profiles = {p.stem for p in profile_pages}
     domains = {p.stem for p in real(by_dir.get("domains", []))}
     referenced: set[str] = set()
-    index_pages = [p for p in [map_path, *by_dir.get("domains", [])] if p.exists() and not p.name.startswith("_")]
+    index_pages = ([map_path] if map_path.exists() else []) + real(by_dir.get("domains", []))  # the map may itself be `_map.md`
     for p in index_pages:
         text = _read(p)
         referenced.update(n.split("/")[-1].removesuffix(".md") for n in link_targets(text))
@@ -216,10 +282,10 @@ def run_lint(hub: Path, today: date | None = None, now: datetime | None = None) 
                                        f"'{name}' is listed but has no profile (projects/{name}.md)"))
     for name in sorted(profiles - referenced):
         out.append(Finding("orphan-project", "error", f"projects/{name}.md",
-                           "profile is not listed in map.md or any domain page"))
+                           f"profile is not listed in {map_name} or any domain page"))
 
     # profile-frontmatter + profile-stale
-    for p in real(by_dir.get("projects", [])):
+    for p in profile_pages:
         fm, _ = parse_frontmatter(_read(p))
         missing = [k for k in ("owner", "domain") if not fm.get(k)]
         upd = fm.get("updated")

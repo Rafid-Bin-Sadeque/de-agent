@@ -31,6 +31,7 @@ scans:
     path: airflow
     dag_folders: [dags]
     dataset_tables: ["warehouse://{schema}/{table}"]
+    connections: {warehouse: warehouse}   # Airflow conn_id -> de-agent source: a `CALL x.y` resolves to the live routine
   - name: analytics
     type: dbt
     path: dbt/acme

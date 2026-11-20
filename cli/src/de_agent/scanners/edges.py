@@ -32,6 +32,121 @@ def _find_proc(idx: dict[str, dict[str, Any]], name: str) -> dict[str, Any] | No
     return hits[0] if len(hits) == 1 else None
 
 
+class Resolver:
+    """Resolves a `CALL x.y` to live routines and/or a repo-scanned procedure (v0.3 section 3.2).
+
+    Order: (1) the connection -> source mapping of the scan, (2) a unique live match, (3) a unique repo match,
+    (4) unresolved, listing every candidate."""
+
+    def __init__(self, repo: dict[str, dict[str, Any]], live: list[dict[str, Any]] | None,
+                 connections: dict[str, dict[str, str]] | None) -> None:
+        self.repo = repo
+        self.connections = connections or {}
+        self.nodes: list[dict[str, Any]] = []
+        for n in live or []:
+            if n["kind"] not in ("procedure", "function", "view", "materialized_view", "trigger"):
+                continue
+            schema = str(n.get("schema") or "")
+            rq, wq = [], []
+            qualified = False
+            for side, out in (("reads", rq), ("writes", wq)):
+                for t in n.get(side, []):
+                    q, was = _qualify(t, schema)
+                    qualified = qualified or was
+                    out.append(q)
+            self.nodes.append({"id": n["id"], "source": n["source"], "kind": n["kind"], "name": n["qname"],
+                               "args": n.get("args", ""), "reads": sorted(set(rq)), "writes": sorted(set(wq)),
+                               "calls": list(n.get("calls", [])), "heuristic": qualified or n.get("parse") == "heuristic",
+                               "parse": n.get("parse", "none"), "live": True})
+
+    @staticmethod
+    def _match(nodes: list[dict[str, Any]], name: str) -> list[dict[str, Any]]:
+        name = name.lower()
+        return [n for n in nodes if n["kind"] in ("procedure", "function")
+                and (n["name"] == name or n["name"].endswith("." + name))]
+
+    def resolve(self, name: str, conn: str | None = None, scan: str | None = None,
+                source: str | None = None) -> tuple[list[dict[str, Any]], list[str]]:
+        """(resolved nodes, candidates). Nodes are live dicts or the repo record; empty when unresolved."""
+        pool = [n for n in self.nodes if source is None or n["source"] == source]
+        mapped = self.connections.get(scan or "", {}).get(conn or "") if conn else None
+        if mapped:
+            hit = self._match([n for n in pool if n["source"] == mapped], name)
+            if hit:
+                return hit, []
+        live = self._match(pool, name)
+        if live:
+            by_q = {(n["source"], n["name"]) for n in live}
+            if len(by_q) == 1:  # a unique routine (overloads of it count as one)
+                return live, []
+        repo = _find_proc(self.repo, name) if source is None else None
+        if repo is not None:
+            return [repo], []
+        cands = sorted({n["id"] for n in live} | {f"repo:{v['name']}" for k, v in self.repo.items()
+                                                   if k == name or k.endswith("." + name) or name.endswith("." + k)})
+        return [], cands
+
+
+def _qualify(name: str, schema: str) -> tuple[str, bool]:
+    if "." in name or not schema or is_path(name):
+        return name, False
+    return f"{schema.lower()}.{name}", True
+
+
+def _call_edges(put: Any, calls: list[dict[str, str]], unresolved: list[dict[str, Any]], rsv: Resolver,
+                base: dict[str, Any], name: str, conn: str | None, scan: str, edge: dict[str, Any]) -> None:
+    """Edges of one `CALL name` from owner `base` (a DAG / script): table edges through the routine body (as before) plus,
+    for a live routine, a `calls` edge so the routine is a node on the path."""
+    nodes, cands = rsv.resolve(name, conn, scan)
+    if not nodes:
+        u: dict[str, Any] = {"kind": "proc", "name": name, "referenced_by": base["id"]}
+        if cands:
+            u["candidates"] = cands
+        unresolved.append(u)
+        return
+    for p in nodes:
+        pe = {**edge, "proc": p["name"]}
+        for t in p["writes"]:
+            put(t, "writers", pe)
+        for t in p["reads"]:
+            put(t, "readers", pe)
+        if p.get("live"):
+            calls.append({"from": base["id"], "to": p["id"], "via": edge.get("config") or "call", "file": edge.get("file", "")})
+
+
+def _live_edges(put: Any, calls: list[dict[str, str]], unresolved: list[dict[str, Any]], rsv: Resolver) -> None:
+    """Table edges, calls and trigger edges of the live routines themselves."""
+    for n in rsv.nodes:
+        base = {"id": n["id"], "project": n["source"], "scan": n["source"], "via": "routine",
+                "file": f"{n['source']}:{n['name']}"}
+        if n["heuristic"]:
+            base["heuristic"] = True
+        if n["kind"] in ("view", "materialized_view"):
+            put(n["name"], "writers", base)
+        elif n["kind"] != "trigger":
+            for t in n["writes"]:
+                put(t, "writers", base)
+        for t in n["reads"]:
+            put(t, "readers", base)
+        for name in n["calls"]:
+            hit, cands = rsv.resolve(name, source=n["source"])
+            if not hit:
+                u = {"kind": "proc", "name": name, "referenced_by": n["id"]}
+                if cands:
+                    u["candidates"] = cands
+                unresolved.append(u)
+                continue
+            for h in hit:
+                calls.append({"from": n["id"], "to": h["id"], "via": "trigger" if n["kind"] == "trigger" else "call",
+                              "file": base["file"]})
+        if n["kind"] == "trigger":
+            m = re.match(r"^on (.+)$", n["args"] or "")
+            if m:  # the table a trigger fires on: a write to it reaches the trigger's function
+                schema = n["name"].rsplit(".", 1)[0] if "." in n["name"] else ""
+                tbl = f"{schema}.{m.group(1).lower()}" if schema else m.group(1).lower()
+                put(tbl, "readers", base)
+
+
 def s3_node(bucket: str, prefix: str = "") -> str:
     """Normalized S3 node key: lowercase, `s3://bucket/prefix/` with a trailing slash. Firehose `!{...}` expressions
     are cut: only the static head of the prefix names the node (cut back to a whole path segment)."""
@@ -141,8 +256,8 @@ def _aws_edges(platform: list[dict[str, Any]], put_node: Any, unresolved: list[d
     return n
 
 
-def _record_edges(put: Any, procs: dict[str, dict[str, Any]], unresolved: list[dict[str, str]], base: dict[str, Any],
-                  rec: dict[str, Any], via: str, file: str) -> None:
+def _record_edges(put: Any, rsv: Resolver, calls: list[dict[str, str]], unresolved: list[dict[str, Any]],
+                  base: dict[str, Any], rec: dict[str, Any], via: str, file: str) -> None:
     """Edges for one SQL/table record (`reads`, `writes`, `calls`) of an owner."""
     e = {**base, "via": via, "file": file}
     for k in ("hops",):
@@ -157,25 +272,20 @@ def _record_edges(put: Any, procs: dict[str, dict[str, Any]], unresolved: list[d
     for t in rec["reads"]:
         put(t, "readers", e)
     for name in rec["calls"]:
-        p = _find_proc(procs, name)
-        if p is None:
-            unresolved.append({"kind": "proc", "name": name, "referenced_by": base["id"]})
-            continue
-        pe = {**e, "proc": p["name"]}
-        for t in p["writes"]:
-            put(t, "writers", pe)
-        for t in p["reads"]:
-            put(t, "readers", pe)
+        _call_edges(put, calls, unresolved, rsv, base, name, rec.get("conn_id"), base.get("scan", ""), e)
 
 
 def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | None = None,
-                ignore_tables: list[str] | tuple[str, ...] = ()) -> dict[str, Any]:
+                ignore_tables: list[str] | tuple[str, ...] = (), routines: list[dict[str, Any]] | None = None,
+                connections: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:
     tables: dict[str, dict[str, dict[str, Any]]] = {}
-    unresolved: list[dict[str, str]] = []
+    unresolved: list[dict[str, Any]] = []
+    calls: list[dict[str, str]] = []
     dag_links: list[dict[str, str]] = []
     unqualified = 0
     sql_results = [r for r in results if r["type"] == "sql"]
     procs = _proc_index(sql_results)
+    rsv = Resolver(procs, routines, connections)
 
     def put(table: str, side: str, edge: dict[str, Any]) -> None:
         nonlocal unqualified
@@ -219,17 +329,17 @@ def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | 
                     if ds["unrolled"]:
                         e["unrolled"] = True
                     put(ds["table"], "readers", e)
+                conn_of: dict[str, str | None] = {}
+                for rec in d["sql"]:
+                    for cname in rec.get("calls", []):
+                        conn_of.setdefault(cname, rec.get("conn_id"))
                 for name in d["calls"]:
-                    p = _find_proc(procs, name)
-                    if p is None:
-                        unresolved.append({"kind": "proc", "name": name, "referenced_by": did})
-                        continue
-                    for t in p["writes"]:
-                        put(t, "writers", {**base, "via": "proc", "proc": p["name"]})
-                    for t in p["reads"]:
-                        put(t, "readers", {**base, "via": "proc", "proc": p["name"]})
+                    _call_edges(put, calls, unresolved, rsv, base, name, conn_of.get(name), scan, {**base, "via": "proc"})
+                for cc in d.get("config_calls", []):  # routines named by a config constant the DAG imports
+                    _call_edges(put, calls, unresolved, rsv, base, cc["name"], None, scan,
+                                {**base, "via": "proc", "file": cc["file"], "config": cc["via"]})
                 for ue in d.get("util_edges", []):
-                    _record_edges(put, procs, unresolved, base, ue, ue["via"], f"{d['file']}:{ue['line']}")
+                    _record_edges(put, rsv, calls, unresolved, base, ue, ue["via"], f"{d['file']}:{ue['line']}")
                 for u in d["outlets"]:
                     outlets.setdefault(u, []).append(d["dag_id"])
                 for u in d["inlets"]:
@@ -259,9 +369,9 @@ def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | 
                 base = {"id": o["id"], "project": proj, "scan": scan}
                 dvia = "notebook" if o["kind"] == "notebook" else "python"
                 for rec in o["direct"]:
-                    _record_edges(put, procs, unresolved, base, rec, dvia, rec["file"])
+                    _record_edges(put, rsv, calls, unresolved, base, rec, dvia, rec["file"])
                 for rec in o["util"]:
-                    _record_edges(put, procs, unresolved, base, rec, rec["via"], rec["file"])
+                    _record_edges(put, rsv, calls, unresolved, base, rec, rec["via"], rec["file"])
         elif r["type"] == "terraform":
             for n in r["nodes"]:
                 base = {"id": n["id"], "project": proj, "scan": scan, "via": "terraform", "file": f"{n['file']}:{n['line']}"}
@@ -286,6 +396,7 @@ def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | 
                         put(t, "writers", {**base, "heuristic": True} if o.get("heuristic") else base)
                 for t in o["reads"]:
                     put(t, "readers", {**base, "heuristic": True} if o.get("heuristic") else base)
+    _live_edges(put, calls, unresolved, rsv)
     aws_counts: dict[str, int] = {}
     if platform:
         def put_node(key: str, side: str, edge: dict[str, Any]) -> None:
@@ -308,7 +419,7 @@ def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | 
                     cross.append({"table": t, "writer": w["id"], "writer_project": w["project"], "reader": rd["id"],
                                   "reader_project": rd["project"]})
     unresolved.sort(key=lambda u: (u["kind"], u["name"], u["referenced_by"]))
-    unresolved_dedup = [u for i, u in enumerate(unresolved) if u not in unresolved[:i]]
+    unresolved_dedup = [u for i, u in enumerate(unresolved) if u not in unresolved[:i]]  # noqa: E501
     stats: dict[str, Any] = {"tables": len(out_tables), "unqualified_tables_skipped": unqualified,
                              "cross_project_edges": len(cross), "unresolved_names": len(unresolved_dedup)}
     for k, v in aws_counts.items():
@@ -317,8 +428,18 @@ def build_edges(results: list[dict[str, Any]], platform: list[dict[str, Any]] | 
         for k, v in r.get("stats", {}).items():
             if k.startswith(("unresolved", "unparsed", "unattributed")):
                 stats[f"{r['scan']}.{k}"] = v
+    calls_out = sorted({(c["from"], c["to"], c["via"], c["file"]): c for c in calls}.values(),
+                       key=lambda c: (c["from"], c["to"], c["via"], c["file"]))
+    if routines is not None:
+        stats["routines"] = len(rsv.nodes)
+        stats["calls"] = len(calls_out)
     out = {"tables": out_tables, "cross_project": cross, "dag_links": sorted(
-        dag_links, key=lambda x: (x["from"], x["to"], x["via"])), "unresolved": unresolved_dedup, "stats": stats}
+        dag_links, key=lambda x: (x["from"], x["to"], x["via"])), "unresolved": unresolved_dedup, "stats": stats,
+        "calls": calls_out}
+    if rsv.nodes:
+        out["routines"] = {n["id"]: {"kind": n["kind"], "source": n["source"], "name": n["name"], "args": n["args"],
+                                     "reads": n["reads"], "writes": n["writes"], "calls": n["calls"],
+                                     "parse": n["parse"]} for n in rsv.nodes}
     if ignore_tables:
         out["ignore_tables"] = sorted({t.lower() for t in ignore_tables})
     return out
@@ -335,6 +456,19 @@ def downstream(edges: dict[str, Any], table: str, depth: int = MAX_DEPTH,
     for t, v in tables.items():
         for w in v["writers"]:
             written_by.setdefault(w["id"], set()).add(t)
+    callees: dict[str, set[str]] = {}
+    for c in edges.get("calls", []):
+        callees.setdefault(c["from"], set()).add(c["to"])
+    if callees:  # a trigger / routine also writes what the routines it calls write
+        for nid in list(callees):
+            seen, stack = {nid}, list(callees[nid])
+            while stack:
+                cur = stack.pop()
+                if cur in seen:
+                    continue
+                seen.add(cur)
+                written_by.setdefault(nid, set()).update(written_by.get(cur, ()))
+                stack.extend(callees.get(cur, ()))
     out: list[dict[str, Any]] = []
     seen_nodes: set[tuple[str, str]] = set()
     q: deque[tuple[str, int, list[str]]] = deque([(table, 0, [table])])
@@ -344,7 +478,7 @@ def downstream(edges: dict[str, Any], table: str, depth: int = MAX_DEPTH,
         if d + 1 > depth:
             continue
         own = {w["id"] for w in tables.get(t, {}).get("writers", [])}
-        for rd in tables.get(t, {}).get("readers", []):
+        for rd in sorted(tables.get(t, {}).get("readers", []), key=lambda e: e["via"] != "routine"):  # a live routine claims its tables before a DAG that calls it
             if (rd["id"], t) in seen_nodes or rd["id"] in own:  # a reader that also writes the table (watermark/self-read) is not downstream of it
                 continue
             seen_nodes.add((rd["id"], t))
@@ -355,4 +489,33 @@ def downstream(edges: dict[str, Any], table: str, depth: int = MAX_DEPTH,
                 if t2 not in seen_tables and t2 not in skip:
                     seen_tables.add(t2)
                     q.append((t2, d + 1, [*path, f"[{rd['id']}]", t2]))
+    return out
+
+
+def callers(edges: dict[str, Any], node_id: str) -> list[str]:
+    """Every node that calls `node_id`, directly or through other routines (DAGs, scripts, routines, triggers)."""
+    by_to: dict[str, set[str]] = {}
+    for c in edges.get("calls", []):
+        by_to.setdefault(c["to"], set()).add(c["from"])
+    seen: set[str] = set()
+    stack = [node_id]
+    while stack:
+        for f in sorted(by_to.get(stack.pop(), ())):
+            if f not in seen:
+                seen.add(f)
+                stack.append(f)
+    return sorted(seen)
+
+
+def find_routines(edges: dict[str, Any], spec: str) -> list[str]:
+    """Routine ids matching `proc:schema.name`, `function:...`, `view:...`, `trigger:...` or a full `proc:<source>:schema.name`."""
+    kind, _, rest = spec.partition(":")
+    rest = rest.lower()
+    out = []
+    for rid in sorted(edges.get("routines", {})):
+        rk, _, tail = rid.partition(":")
+        if rk != kind:
+            continue
+        if tail == rest or tail.split(":", 1)[-1] == rest or tail.split(":", 1)[-1].endswith("." + rest):
+            out.append(rid)
     return out

@@ -89,3 +89,21 @@ sections:
       order by active_bytes desc, 1, 2, 3
       limit 20
     key: [table_catalog, table_schema, table_name]
+  - name: routines
+    sql: |
+      select procedure_catalog || '.' || procedure_schema as "schema", procedure_name as name, 'procedure' as kind,
+             lower(argument_signature) as args, lower(procedure_language) as language, lower(data_type) as returns,
+             procedure_owner as owner, procedure_definition as definition
+      from snowflake.account_usage.procedures
+      where deleted is null and procedure_catalog in :databases
+      union all
+      select function_catalog || '.' || function_schema, function_name, 'function', lower(argument_signature),
+             lower(function_language), lower(data_type), function_owner, function_definition
+      from snowflake.account_usage.functions
+      where deleted is null and function_catalog in :databases
+      union all
+      select table_catalog || '.' || table_schema, table_name, 'view', '', 'sql', '', table_owner, view_definition
+      from snowflake.account_usage.views
+      where deleted is null and table_catalog in :databases
+    key: [schema, name, args]
+    columns: [schema, name, kind, args, language, returns, owner, definition]

@@ -13,11 +13,18 @@ from typing import Any
 
 from de_agent.collectors.base import CollectorError, RunContext
 from de_agent.packs import template
-from de_agent.packs.check import MSG_FIELD, check_pack
+from de_agent.packs.check import MSG_FIELD, ROUTINES_SECTION, check_pack
 from de_agent.packs.errors import PackError
 from de_agent.packs.expr import compile_expr
 from de_agent.packs.loader import load_pack
 from de_agent.packs.model import Pack, Section
+from de_agent.routines import (
+    finalize_rows,
+    routine_settings,
+    split_routine_options,
+    validate_routine_options,
+)
+from de_agent.scanners.routines import make_parser
 
 MAX_SIGNALS_PER_RULE = 10
 MAX_JSON_BYTES = 5 * 1024 * 1024
@@ -33,7 +40,7 @@ def load_for_source(source: Any, kind: str) -> Pack:
     if pack.kind != kind:
         raise ValueError(f"pack {pack.pack!r} is kind {pack.kind}; a type: {kind} source needs a {kind} pack")
     try:
-        template.resolve_params(pack.params, source.options)
+        template.resolve_params(pack.params, split_routine_options(source.options)[0])
     except PackError as ex:
         raise ValueError(str(ex)) from None
     return pack
@@ -57,7 +64,9 @@ def validate_for_config(source: Any, kind: str) -> Pack | None:
     if pack.kind != kind:
         raise ValueError(f"pack {pack.pack!r} is kind {pack.kind}; a type: {kind} source needs a {kind} pack")
     try:
-        template.resolve_params(pack.params, source.options)
+        params, rt = split_routine_options(source.options)
+        validate_routine_options(rt)
+        template.resolve_params(pack.params, params)
     except PackError as ex:
         raise ValueError(str(ex)) from None
     return pack
@@ -175,7 +184,9 @@ class PackCollector:
     def collect(self, source: Any, ctx: RunContext) -> dict[str, Any]:
         try:
             pack = load_for_source(source, self.type)
-            params = template.resolve_params(pack.params, source.options)
+            pack_opts, routine_opts = split_routine_options(source.options)
+            validate_routine_options(routine_opts)
+            params = template.resolve_params(pack.params, pack_opts)
         except (ValueError, PackError) as ex:
             return {"data": {}, "errors": [str(ex)]}
         problems = check_pack(pack)
@@ -187,7 +198,8 @@ class PackCollector:
         meta: dict[str, Any] = {
             "pack": pack.pack, "pack_version": pack.version, "kind": pack.kind, "validated": pack.validated,
             "list_keys": {s.name: s.keys for s in pack.sections if s.keys},
-            "volatile": sorted({v for s in pack.sections for v in s.volatile}),
+            "volatile": sorted({v for s in pack.sections for v in s.volatile}
+                               | ({"owner", "reads", "writes", "calls", "parse", "body_bytes"} if any(s.name == ROUTINES_SECTION for s in pack.sections) else set())),
             "sections": {s.name: {"render": s.render, "title": s.title, "columns": s.columns or None} for s in pack.sections},
             "signals": [], "truncated": {},
         }
@@ -198,6 +210,12 @@ class PackCollector:
             return {"data": {}, "errors": [str(ex)]}
         try:
             for sec in pack.sections:
+                is_routines = sec.name == ROUTINES_SECTION
+                if is_routines:
+                    rcfg = routine_settings(routine_opts)
+                    if not rcfg["enabled"]:
+                        continue
+                    sec = sec.model_copy(update={"limit": rcfg["max_rows"]})  # the row cap is routines_max, not the pack's limit
                 items: list[str | None] = [None]
                 if sec.for_each:
                     items = list(params.get(sec.for_each) or [])
@@ -216,6 +234,17 @@ class PackCollector:
                 if items and failed == len(items):
                     continue  # nothing usable: the section is absent from data, the error is recorded
                 meta["signals"] += eval_signals(sec, rows, params, now, errors)
+                if is_routines:
+                    nobody = sum(1 for r in rows if r.get("definition") in (None, ""))
+                    if nobody:
+                        meta["signals"].append({"section": sec.name, "severity": "info", "text": (
+                            f"{nobody} routine(s) listed without a body: the login lacks the privilege that exposes "
+                            "definitions (see docs/routines.md)")})
+                    try:
+                        data[sec.name] = finalize_rows(rows, routine_opts, ctx.routine_store, parser=make_parser(pack.dialect or "postgres"))
+                    except ValueError as ex:
+                        errors.append(f"{sec.name}: {ex}")
+                    continue
                 if len(rows) > sec.limit:
                     meta["truncated"][sec.name] = len(rows)
                 data[sec.name] = rows[: sec.limit]

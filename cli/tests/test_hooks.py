@@ -17,7 +17,9 @@ HOOK_PYTHON = os.environ.get("DEA_HOOK_PYTHON", sys.executable)
 
 def run(script, payload, project_dir, raw=None, env_extra=None):
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(project_dir), CLAUDE_PLUGIN_ROOT=str(ROOT),
-               XDG_CONFIG_HOME=str(Path(project_dir) / ".xdg"))  # approval keys never touch the real ~/.config
+               XDG_CONFIG_HOME=str(Path(project_dir) / ".xdg"),  # approval keys never touch the real ~/.config
+               HOME=str(Path(project_dir) / ".home"))  # nor does a real user hub config
+    env.pop("DEA_HUB", None)
     env.update(env_extra or {})
     p = subprocess.run(
         [HOOK_PYTHON, str(script)],
@@ -442,3 +444,151 @@ def test_dea_help_with_redirect_not_denied_by_sql_guard(tmp_path):
                 'dea query warehouse "select 1" 2>&1 | head'):
         assert run(SQL_GUARD, bash(cmd), tmp_path) is None, cmd
     assert run(SQL_GUARD, bash('dea query warehouse "delete from t" 2>&1 | head'), tmp_path)["permissionDecision"] == "deny"
+
+
+# ---------------- v0.3.1: guards resolve the hub, not the session folder ----------------
+
+CLI_GUARD = ROOT / "scripts" / "cli_guard.py"
+
+
+def _hub_env(tmp_path, hub=None):
+    """Env for a hook run from a session folder with no de-agent.yaml; HOME isolated from any real user config."""
+    env = {"HOME": str(tmp_path / "home"), "DEA_HUB": ""}
+    if hub is not None:
+        env["DEA_HUB"] = str(hub)
+    return env
+
+
+def _hub_and_repo(tmp_path, yaml_text):
+    hub = tmp_path / "hub"
+    repo = tmp_path / "repos" / "svc"
+    hub.mkdir()
+    repo.mkdir(parents=True)
+    (hub / "de-agent.yaml").write_text(yaml_text)
+    return hub, repo
+
+
+def test_hub_mode_ask_applies_from_another_folder(tmp_path):
+    hub, repo = _hub_and_repo(tmp_path, "guard: {mode: ask}\n")
+    out = run(SQL_GUARD, bash('psql -c "delete from t"'), repo, env_extra=_hub_env(tmp_path, hub))
+    assert out["permissionDecision"] == "ask"
+
+
+def test_no_hub_falls_back_to_strict(tmp_path):
+    hub, repo = _hub_and_repo(tmp_path, "guard: {mode: ask}\n")
+    out = run(SQL_GUARD, bash('psql -c "delete from t"'), repo, env_extra=_hub_env(tmp_path))
+    assert out["permissionDecision"] == "deny"
+
+
+def test_walk_up_from_nested_folder_finds_hub(tmp_path):
+    hub = tmp_path / "hub"
+    nested = hub / "a" / "b"
+    nested.mkdir(parents=True)
+    (hub / "de-agent.yaml").write_text("guard: {mode: ask}\n")
+    out = run(SQL_GUARD, bash('psql -c "delete from t"'), nested, env_extra=_hub_env(tmp_path))
+    assert out["permissionDecision"] == "ask"
+
+
+def test_approved_plan_in_hub_honoured_from_another_folder(tmp_path):
+    hub, repo = _hub_and_repo(tmp_path, "guard: {mode: strict}\n")
+    from de_agent.approval import make_approval, write_approval
+    from de_agent.sqlclass import classify
+
+    key = b"test-key"
+    kp = repo / ".xdg" / "de-agent"
+    kp.mkdir(parents=True)
+    (kp / "approve.key").write_bytes(key + b"\n")
+    plans = hub / ".dea" / "plans"
+    plans.mkdir(parents=True)
+    sql = "delete from t where id = 1"
+    write_approval(str(plans / "p1.approved"),
+                   make_approval("p1", [s.hash for s in classify(sql)], "tester", "2026-10-27T00:00:00Z", key))
+    p = bash(f'psql -c "{sql}"', agent_type="de-agent:executor")
+    assert run(SQL_GUARD, p, repo, env_extra=_hub_env(tmp_path, hub)) is None
+    # without the hub the same plan grants nothing
+    assert run(SQL_GUARD, p, repo, env_extra=_hub_env(tmp_path))["permissionDecision"] == "deny"
+
+
+def test_cli_allow_from_hub_applies(tmp_path):
+    hub, repo = _hub_and_repo(tmp_path, 'guard: {cli_allow: ["dbt run"]}\n')
+    p = bash("dbt run --select orders")
+    assert run(CLI_GUARD, p, repo, env_extra=_hub_env(tmp_path, hub)) is None
+    assert run(CLI_GUARD, p, repo, env_extra=_hub_env(tmp_path))["permissionDecision"] == "deny"
+
+
+def test_query_log_writes_into_the_hub(tmp_path):
+    hub, repo = _hub_and_repo(tmp_path, "guard: {mode: strict}\n")
+    payload = {"tool_name": "Bash", "tool_input": {"command": 'psql -c "select 1"'}, "cwd": str(repo),
+               "tool_response": {"exit_code": 0}}
+    run(ROOT / "scripts" / "query_log.py", payload, repo, env_extra=_hub_env(tmp_path, hub))
+    assert (hub / ".dea" / "logs" / "queries.jsonl").is_file()
+    assert not (repo / ".dea").exists()
+
+
+# ---- v0.3.2 1a: heredoc bodies are data unless the reader is a shell
+_REPRO_1A = (
+    'cd hub && LIVE="$HOME/x.csv" && python3 tool.py "$LIVE" >/dev/null && python3 - "$HOME/a.csv" "$LIVE" <<\'EOF\'\n'
+    "add = sorted(set(lk) - set(sk))\n"
+    "EOF"
+)
+
+
+@pytest.mark.parametrize("cmd", [
+    _REPRO_1A,
+    "node - <<'EOF'\nconst s = set\nprintenv\nEOF",
+    "cat <<'EOF'\nset\nEOF",
+    "python3 - <<'EOF'\nimport os\nprint(sorted(set(os.listdir('.'))))\nEOF",
+])
+def test_secret_guard_heredoc_for_non_shell_is_data(tmp_path, cmd):
+    assert run(SECRET_GUARD, bash(cmd), tmp_path) is None
+
+
+@pytest.mark.parametrize("cmd", [
+    "bash <<'EOF'\nset\nEOF",
+    "bash -s <<'EOF'\nprintenv\nEOF",
+    "sh -s <<'EOF'\nset\nEOF",
+    "ssh host <<'EOF'\nset\nEOF",
+    "ssh -i key -p 22 host <<EOF\nprintenv\nEOF",
+    "sudo bash <<'EOF'\nenv\nEOF",
+    "python3 - <<'EOF'\nopen('.env').read()\nEOF",
+    "python3 - <<'EOF'\nprint(open('/home/u/.pgpass').read())\nEOF",
+])
+def test_secret_guard_heredoc_for_shell_or_secret_open_still_denied(tmp_path, cmd):
+    out = run(SECRET_GUARD, bash(cmd), tmp_path)
+    assert out["permissionDecision"] == "deny"
+
+
+# ---- v0.3.2 1b: password= code references; one table for lint and the hook so they cannot drift
+PASSWORD_CASES = [  # (text, is_secret)
+    ("python3 -c \"import pymysql; pymysql.connect(host=h, password=cfg['password'])\"", False),
+    ("python3 -c \"import psycopg; psycopg.connect(host='h', password=os.environ['PGPASS'])\"", False),
+    ("python3 -c \"import psycopg; psycopg.connect(host='h', password=os.getenv('PGPASS'))\"", False),
+    ("python3 -c \"import pymysql; pymysql.connect(host=h, password=self.cfg.get('pw'))\"", False),
+    ("psql 'host=h dbname=d password=${PGPW}'", False),
+    ("psql 'host=h dbname=d password=<your-password>'", False),
+    ("python3 -c \"import pymysql; pymysql.connect(host=h, password=hunter2)\"", True),
+    ("python3 -c \"import pymysql; pymysql.connect(host=h, password=settings.DB_PASSWORD)\"", True),
+    ("psql 'host=h dbname=d user=u password=hunter2'", True),
+    ("psql 'host=h password=cfg[0] password=hunter2'", True),  # one literal among code refs is still a literal
+]
+
+
+@pytest.mark.parametrize(("text", "is_secret"), PASSWORD_CASES)
+def test_password_code_refs_lint_and_hook_agree(tmp_path, text, is_secret):
+    from de_agent.secretscan import find_secret
+
+    assert (find_secret(text) is not None) is is_secret
+    out = run(SECRET_GUARD, bash(text), tmp_path)
+    if is_secret:
+        assert out and out["permissionDecision"] == "deny"
+    else:
+        assert out is None
+
+
+def test_password_code_ref_fallback_matches_lint():
+    """System python without the package uses inline copies: they must stay byte-identical to lint's patterns."""
+    from de_agent import secretscan
+
+    src = SECRET_GUARD.read_text()
+    for name in ("_CODE_REF", "_PLACEHOLDER"):
+        assert f'{name} = re.compile(r"{getattr(secretscan, name).pattern}"' in src

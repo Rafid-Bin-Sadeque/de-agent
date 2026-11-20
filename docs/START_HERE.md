@@ -42,6 +42,7 @@ You open Claude in your hub folder and type like you'd message a colleague. Some
 | "**Is extract_orders healthy?**" | Claude checks the latest runs, failures and freshness for that pipeline and answers *healthy / degraded / broken*, quoting the evidence. |
 | "**The revenue dashboard didn't update today. Why?**" | Claude takes a fresh snapshot, compares it with the last one, follows the data upstream (dashboard ← mart ← model ← raw table ← pipeline) and finds the first broken link. Example: "the extract pipeline is paused". |
 | "**What breaks if I change the orders table?**" | Claude runs `dea impact orders` and lists every model, job and export downstream, with the path to each. |
+| "**Which procedure writes daily_orders, and what changed in it?**" | Claude uses the procedures and views `dea snapshot` collected from your warehouse: `dea impact proc:...` for who calls it and what it feeds, `dea diff` for the changed lines. |
 | "**Backfill the daily revenue mart for Oct 1–3.**" | Claude writes a **plan**: what to run, in what order, how to check each step worked, and how to undo it. It doesn't run anything yet. |
 | "**Rename customer_id to cust_id safely.**" | Claude writes a plan using the safe pattern (add the new column, copy data, switch readers, remove the old column later), instead of a risky one-shot rename. |
 
@@ -177,6 +178,27 @@ Step-by-step with examples: [adoption.md](adoption.md). Every config option: [co
 **Do this first:** give de-agent its own **read-only** login. The safety rules are strong, but a read-only login makes accidents impossible
 at the database level too. Copy-paste setup for Postgres, Redshift, MySQL, Snowflake, BigQuery, SQL Server, Databricks, AWS, Airflow and
 Kubernetes: [read-only-access.md](read-only-access.md). A human runs it once; Claude cannot (creating a login is a write).
+
+## Keep snapshots fresh
+
+de-agent does not run background jobs on its own. A snapshot older than `hub.snapshot_max_age_hours` (default 24) is
+flagged as stale at session start. To refresh daily, print a ready-made job and install it yourself:
+
+```
+dea schedule print                 # daily at 06:00; --at 07:30 and --sources a,b change that
+```
+
+On macOS this prints a launchd plist (save it to `~/Library/LaunchAgents/io.de-agent.snapshot.plist`, then
+`launchctl load` it); elsewhere it prints one crontab line (add it with `crontab -e`). The job runs `dea snapshot` with
+`DEA_HUB` set and logs to `<hub>/.dea/logs/snapshot.log` (rotated at 1 MB, 7 files kept). `dea schedule print` only
+prints; it never writes a file or installs anything.
+
+### Export DMS mappings
+
+`dea export dms-mappings [--csv PATH] [--source NAME]` writes the `dms_table_mappings` section of the latest snapshot
+(AWS sources with `services.dms`) as CSV: `task,schema,table,target_schema,target_table,rule,source_endpoint,target_endpoint`.
+It makes no AWS call. Without `--csv` it prints to stdout. If the list was capped, it warns on stderr; raise
+`options.dms_mappings_max` on the source.
 
 ## Works with your systems
 

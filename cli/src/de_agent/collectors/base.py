@@ -29,6 +29,7 @@ class RunContext:
     prior: dict[str, Any] | None = None  # latest usable earlier result of this source (heavy-section reuse)
     deep: bool = False  # `dea snapshot --deep`: recompute everything, ignore `prior`
     now: datetime | None = None  # injectable clock (tests)
+    routine_store: Any = None  # de_agent.routines.RoutineStore: where routine bodies go (None: bodies are hashed, not stored)
     pack_fn: Callable[..., Any] | None = None  # injectable executor for pack collectors (tests): (section, item, payload) -> result
 
     def remaining(self) -> float:

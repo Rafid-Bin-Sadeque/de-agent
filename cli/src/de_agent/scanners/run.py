@@ -8,10 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from de_agent.routines import RoutineStore
 from de_agent.scanners import airflow as af
 from de_agent.scanners import catalog, headers
 from de_agent.scanners import dbt as dbt_scan
 from de_agent.scanners import python as py_scan
+from de_agent.scanners import routines as rt_scan
 from de_agent.scanners import sql as sql_scan
 from de_agent.scanners import terraform as tf_scan
 from de_agent.scanners.common import SCANNER_VERSION, last_commit, sha1, source_revision
@@ -170,6 +172,25 @@ def platform_results(hub: Path, cfg: Any) -> list[dict[str, Any]]:
     return out
 
 
+def routine_sources(hub: Path, cfg: Any) -> list[dict[str, Any]]:
+    """Latest usable snapshot rows of the `routines` section of every SQL source (postgres, redshift, sql packs)."""
+    from de_agent.runner import result_status
+    from de_agent.snapshot import list_snapshots, load_result
+
+    snaps = list_snapshots(hub)
+    out: list[dict[str, Any]] = []
+    for s in cfg.sources:
+        if s.type in ("aws", "airflow", "dbt", "cli", "http"):
+            continue
+        for sid in reversed(snaps):
+            r = load_result(hub, sid, s.name)
+            rows = ((r or {}).get("data") or {}).get("routines")
+            if r and result_status(r) != "failed" and isinstance(rows, list):
+                out.append({"source": s.name, "dialect": rt_scan.dialect_of_source(r), "rows": rows, "snapshot_id": sid})
+                break
+    return out
+
+
 def run_scan(hub: Path, cfg: Any, only: list[str] | None = None, full: bool = False) -> ScanOutcome:
     out = ScanOutcome()
     state_p = hub / ".dea" / STATE
@@ -209,10 +230,19 @@ def run_scan(hub: Path, cfg: Any, only: list[str] | None = None, full: bool = Fa
                           "revision": st["revision"], "stats": res.get("stats", {})})
     ordered = [results[s.name] for s in cfg.scans if s.name in results]
     platform = platform_results(hub, cfg)
-    edges = build_edges(ordered, platform, cfg.edges.ignore_tables)
+    rt_sources = routine_sources(hub, cfg)
+    rt_catalog = rt_scan.build_catalog(rt_sources, RoutineStore(hub), _load_json(hub / "catalog" / "routines.json"))
+    live = rt_scan.live_routines(rt_catalog)
+    repo_objects = [{**o, "scan": r["scan"]} for r in ordered if r["type"] == "sql" for o in r["objects"]]
+    drifts = rt_scan.drift(live, repo_objects)
+    out.warnings.extend(f"{d['source']}: {rt_scan.drift_message(d)}" for d in drifts)
+    connections = {s.name: dict(s.connections) for s in cfg.scans if s.connections}
+    edges = build_edges(ordered, platform, cfg.edges.ignore_tables, routines=live if rt_sources else None,
+                        connections=connections)
     out.edges = edges
     rev = ",".join([f"{r['scan']}@{r['revision']}" for r in ordered]
-                   + [f"{p['source']}@{p['snapshot_id']}" for p in platform]) or "none"
+                   + [f"{p['source']}@{p['snapshot_id']}" for p in platform]
+                   + [f"{p['source']}@{p['snapshot_id']}" for p in rt_sources]) or "none"
     pages: dict[str, str] = {}
     symbols: dict[str, Any] = {}
     for r in ordered:
@@ -228,7 +258,9 @@ def run_scan(hub: Path, cfg: Any, only: list[str] | None = None, full: bool = Fa
             pages.update(catalog.render_terraform(r))
         else:
             pages.update(catalog.render_sql(r))
-    if ordered or platform:
+    if rt_sources:
+        pages.update(catalog.render_routines(rt_catalog, drifts, rev))
+    if ordered or platform or rt_sources:
         pages.update(catalog.render_edges(edges, rev))
         pages.update(catalog.render_symbols_json(symbols, rev))
     for rel, text in sorted(pages.items()):

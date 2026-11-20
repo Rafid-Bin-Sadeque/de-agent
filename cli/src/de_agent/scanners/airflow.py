@@ -37,6 +37,39 @@ HOOK_METHODS = {"run", "get_records", "get_first", "get_pandas_df", "execute", "
 OPERATOR_RE = re.compile(r"(Operator|Sensor)$")
 
 
+ROUTINE_KEYS = {"proc", "procedure", "sp", "stored_procedure", "routine", "function"}
+ROUTINE_CAP = 2000  # entries kept per config constant
+_CALL_PREFIX = re.compile(r"^call\s+", re.I)
+_ROUTINE_NAME = re.compile(r"^[a-z_][\w$]*\.[a-z_][\w$]*$")
+
+
+def routine_name(value: str) -> str | None:
+    """`schema.name`, `schema.name(...)` or `CALL schema.name(...)` -> `schema.name` (lower case); anything else None."""
+    t = _CALL_PREFIX.sub("", value.strip()).split("(", 1)[0].strip().rstrip(";").strip().lower()
+    return t if _ROUTINE_NAME.match(t) else None
+
+
+def _routine_literals(node: ast.AST, out: list[str], dyn: list[int]) -> None:
+    """Strings under proc/procedure/sp/... keys of the dicts nested in a list/tuple/dict literal. Non-literal values are
+    counted in `dyn` and skipped."""
+    if isinstance(node, ast.Dict):
+        for k, v in zip(node.keys, node.values):
+            if isinstance(k, ast.Constant) and isinstance(k.value, str) and k.value.lower() in ROUTINE_KEYS:
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    n = routine_name(v.value)
+                    if n and n not in out and len(out) < ROUTINE_CAP:
+                        out.append(n)
+                elif isinstance(v, ast.Constant):
+                    continue
+                else:
+                    dyn[0] += 1
+            elif k is not None:
+                _routine_literals(v, out, dyn)
+    elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        for e in node.elts:
+            _routine_literals(e, out, dyn)
+
+
 class Instance:
     """One discovered DAG construction (before expansion over factory call sites / loops)."""
 
@@ -94,6 +127,29 @@ class FileScanner:
                         isinstance(f, ast.Attribute) and f.attr == "import_module"):
                     self.dynamic_calls += 1
         return sorted(out)
+
+    def routine_consts(self) -> dict[str, dict[str, Any]]:
+        """Module-level `NAME = <list/tuple/dict literal>` (assigned once) that names routines: {NAME: {procs, dynamic, line}}."""
+        counts: dict[str, int] = {}
+        for node in self.tree.body:
+            for tgt in _targets(node):
+                counts[tgt] = counts.get(tgt, 0) + 1
+        out: dict[str, dict[str, Any]] = {}
+        for node in self.tree.body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                name, value = node.targets[0].id, node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+                name, value = node.target.id, node.value
+            else:
+                continue
+            if counts.get(name) != 1 or not isinstance(value, (ast.List, ast.Tuple, ast.Dict)):
+                continue
+            procs: list[str] = []
+            dyn = [0]
+            _routine_literals(value, procs, dyn)
+            if procs or dyn[0]:
+                out[name] = {"procs": procs, "dynamic": dyn[0], "line": node.lineno}
+        return out
 
     def defs(self) -> list[dict[str, Any]]:
         out = []
@@ -211,7 +267,7 @@ class FileScanner:
         for d in dags:
             self._finish_dag(d)
         return {"dags": dags, "uses": self.uses(), "star_imports": self.star_imports,
-                "dynamic_calls": self.dynamic_calls, "defs": self.defs(),
+                "dynamic_calls": self.dynamic_calls, "defs": self.defs(), "routine_consts": self.routine_consts(),
                 "stats": {**self.stats, "unattributed_sql": unattributed}}
 
     def _new_acc(self) -> dict[str, Any]:
@@ -426,6 +482,13 @@ class FileScanner:
         if "template_searchpath" in kws:
             vs, _ = self.ev.strings(kws["template_searchpath"], scopes)
             acc["searchpaths"].update(vs or [])
+        conn: str | None = None
+        for ck, cv in kws.items():
+            if ck == "conn_id" or ck.endswith("_conn_id"):
+                cvs, _ = self.ev.strings(cv, scopes)
+                if cvs and len(cvs) == 1:
+                    conn = cvs[0]
+                    break
         sql_nodes: list[ast.AST] = []
         if "sql" in kws:
             sql_nodes.append(kws["sql"])
@@ -433,7 +496,7 @@ class FileScanner:
             sql_nodes.append(call.args[0])
         for sn in sql_nodes:
             for leaf in (sn.elts if isinstance(sn, (ast.List, ast.Tuple)) else [sn]):
-                self._sql(leaf, scopes, acc, line, explicit="sql" in kws and leaf is kws["sql"])
+                self._sql(leaf, scopes, acc, line, explicit="sql" in kws and leaf is kws["sql"], conn=conn)
 
     def _spec(self, node: ast.AST, scopes: dict[str, Any]) -> tuple[list[str] | None, bool]:
         vs, used = self.ev.strings(node, scopes)
@@ -493,7 +556,8 @@ class FileScanner:
                 for v in vs:
                     acc[bucket].append({"uri": v, "unrolled": bool(unrolled), "line": line})
 
-    def _sql(self, node: ast.AST, scopes: dict[str, Any], acc: dict[str, Any], line: int, explicit: bool) -> None:
+    def _sql(self, node: ast.AST, scopes: dict[str, Any], acc: dict[str, Any], line: int, explicit: bool,
+             conn: str | None = None) -> None:
         vs, unrolled = self.ev.strings(node, scopes)
         if vs is None:
             stringish = isinstance(node, (ast.JoinedStr, ast.BinOp)) or (
@@ -510,6 +574,8 @@ class FileScanner:
                 continue
             res = analyze_sql(text, self.dialect)
             res.update({"line": line, "unrolled": bool(unrolled), "text": " ".join(text.split())[:120]})
+            if conn:
+                res["conn_id"] = conn  # Airflow connection id of the operator: maps a CALL to a de-agent source
             acc["sql"].append(res)
 
 
@@ -519,7 +585,11 @@ def scan_python(src: str, rel: str, dialect: str) -> dict[str, Any]:
     except (SyntaxError, ValueError) as ex:
         return {"rel": rel, "error": f"{type(ex).__name__}: {str(ex)[:80]}", "dags": [], "uses": [], "star_imports": 0,
                 "dynamic_calls": 0, "defs": [], "stats": {}}
-    res = fs.scan()
+    try:
+        res = fs.scan()
+    except RecursionError:  # one pathological file must not crash the whole scan
+        return {"rel": rel, "error": "recursion limit while evaluating loops", "dags": [], "uses": [], "star_imports": 0,
+                "dynamic_calls": 0, "defs": [], "stats": {}}
     res["rel"] = rel
     try:
         code = pycode.CodeScanner(fs.tree, rel, dialect).scan()
@@ -569,6 +639,48 @@ def util_module_name(root: Path, entry: str, file: Path) -> str:
     return mod.removesuffix(".__init__")
 
 
+def _module_index(scan: Any, per_file: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """dotted module name -> rel path of a scanned file, for the import roots Airflow puts on sys.path (dag folders, util
+    package parents, the repo root). Files outside the scan are never in it."""
+    prefixes: list[str] = []
+    for f in [*scan.dag_folders, *(str(Path(e).parent) for e in scan.util_packages), "."]:
+        pre = "" if f in ("", ".") else f.strip("/") + "/"
+        if pre not in prefixes:
+            prefixes.append(pre)
+    out: dict[str, str] = {}
+    for pre in prefixes:
+        for rel in sorted(per_file):
+            if not rel.startswith(pre) or not rel.endswith(".py"):
+                continue
+            mod = rel[len(pre):-3].replace("/", ".").removesuffix(".__init__")
+            if mod:
+                out.setdefault(mod, rel)
+    return out
+
+
+def _config_calls(pf: dict[str, Any], per_file: dict[str, dict[str, Any]], by_mod: dict[str, str],
+                  stats: dict[str, int]) -> list[dict[str, str]]:
+    """Routines named by module-level config constants this DAG file actually uses (`from m import NAME` / `m.NAME`)."""
+    out: dict[tuple[str, str], dict[str, str]] = {}
+    seen: set[tuple[str, str]] = set()
+    for u in pf.get("uses", []):
+        parts = u.split(".")
+        for k in range(len(parts), 1, -1):
+            mod, name = ".".join(parts[:k - 1]), parts[k - 1]
+            crel = by_mod.get(mod)
+            const = per_file.get(crel, {}).get("routine_consts", {}).get(name) if crel else None
+            if const is None:
+                continue
+            if (mod, name) not in seen:
+                seen.add((mod, name))
+                stats["dynamic_config_entries"] += const["dynamic"]
+                for proc in const["procs"]:
+                    out.setdefault((proc, f"{mod}.{name}"), {"name": proc, "via": f"config:{mod}.{name}",
+                                                             "file": f"{crel}:{const['line']}"})
+            break
+    return [out[k] for k in sorted(out)]
+
+
 def assemble(scan: Any, root: Path, per_file: dict[str, dict[str, Any]], util_files: dict[str, str],
              dag_files: set[str], revision: str) -> dict[str, Any]:
     """Join per-file results: resolve datasets, .sql refs and util symbol usage."""
@@ -602,13 +714,16 @@ def assemble(scan: Any, root: Path, per_file: dict[str, dict[str, Any]], util_fi
     dags: list[dict[str, Any]] = []
     stats = {"dag_files": len(dag_files), "dags": 0, "dynamic_dags": 0, "unresolved_calls": 0,
              "unresolved_sql": 0, "unresolved_datasets": 0, "unparsed_sql": 0, "unattributed_sql": 0,
-             "unresolved_sql_files": 0, "parse_errors": 0, "unresolved_util_args": 0, "util_scan_errors": 0}
+             "unresolved_sql_files": 0, "parse_errors": 0, "unresolved_util_args": 0, "util_scan_errors": 0,
+             "dynamic_config_entries": 0}
     graph = pycode.UtilGraph({r: {"funcs": pf.get("funcs", {}), "imports": pf.get("imports", {})}
                               for r, pf in per_file.items()}, scan.dialect, explicit=util_files)
+    by_mod = _module_index(scan, per_file)
     for rel in sorted(dag_files):
         pf = per_file.get(rel)
         if not pf:
             continue
+        cfg_calls = _config_calls(pf, per_file, by_mod, stats)
         if pf.get("error"):
             stats["parse_errors"] += 1
         stats["unresolved_calls"] += pf["star_imports"] + pf["dynamic_calls"]
@@ -651,6 +766,7 @@ def assemble(scan: Any, root: Path, per_file: dict[str, dict[str, Any]], util_fi
             d["reads"], d["writes"], d["calls"] = sorted(reads), sorted(writes), sorted(calls)
             d["sql"] = [{k: v for k, v in r.items() if k != "text"} for r in d["sql"]]
             d["util_edges"] = graph.inherited(rel, d.pop("ucalls", []))
+            d["config_calls"] = cfg_calls
             dags.append(d)
             stats["dags"] += 1
             stats["dynamic_dags"] += 1 if d["dynamic"] else 0

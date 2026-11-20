@@ -64,3 +64,12 @@ _Pack `snowflake` v1, sql, validated: fixtures (fixtures only: not yet run again
 | table_catalog | table_schema | table_name | active_bytes | time_travel_bytes | failsafe_bytes |
 |---|---|---|---|---|---|
 | SHOP_DB | PUBLIC | ORDERS_RAW | 9663676416 | 1073741824 | 536870912 |
+
+## Routines
+
+| schema | procedure | function | view | total |
+|---|---|---|---|---|
+| SHOP_DB.PUBLIC | 1 | 1 | 1 | 3 |
+
+- parse coverage: full 2, heuristic 1, none 0
+- truncated: 0, redacted: 0, without a body: 0

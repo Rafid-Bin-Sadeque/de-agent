@@ -33,6 +33,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO dea_ro;   --
 - The top-queries section reads `pg_stat_statements` when the extension is installed; `pg_monitor` covers it. Without the extension the
   section says so and the rest of the page still renders.
 - Point it at a read replica when you have one: the collector's queries are light, but a replica keeps them off the primary entirely.
+- Routines (procedures, functions, views, triggers) need nothing extra: catalog definitions are readable by any role ([routines.md](routines.md)).
 
 ## Amazon Redshift (`type: redshift`)
 
@@ -44,6 +45,7 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO dea_ro;   -- table health in SVV_
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO dea_ro;
 ```
 
+- Routines: `pg_proc_info`, `pg_views` and `svv_mv_info` need no extra grant beyond `USAGE` on the schemas ([routines.md](routines.md)).
 - Without `SYSLOG ACCESS UNRESTRICTED` the user sees only its own queries, so the workload page shows de-agent and nothing else.
   It also exposes other users' query text, which can contain literal values: decide that with whoever owns the cluster.
 - With the Data API transport, give the IAM principal `redshift-data:ExecuteStatement`, `BatchExecuteStatement`, `DescribeStatement` and
@@ -60,6 +62,9 @@ GRANT SELECT, EXECUTE ON sys.* TO 'dea_ro'@'%';              -- sys.innodb_lock_
 GRANT SELECT, SHOW VIEW ON orders.* TO 'dea_ro'@'%';         -- only if you want `dea query` on data
 ```
 
+- Routines: add `GRANT SHOW_ROUTINE ON *.* TO 'dea_ro'@'%';` for procedure and function bodies (without it the row is kept and a signal says
+  so) and `SHOW VIEW` (above) for view bodies. Triggers are listed only to a login with `TRIGGER`, which can also create them: grant it
+  only if you accept that ([routines.md](routines.md)).
 - MySQL has no per-user read-only switch; the pack runs every section in `START TRANSACTION READ ONLY`, and the grants above contain no write.
 - A replica with `super_read_only = ON` is the safest target.
 
@@ -77,7 +82,7 @@ GRANT ROLE dea_ro TO USER dea_ro_user;
 
 - Prefer key-pair authentication; keep the private key file at mode 0600 and reference it with `file:`.
 - Snowflake has no read-only transaction mode, so the role is the whole guarantee: give it no `OWNERSHIP`, `INSERT`, `OPERATE` or `CREATE`.
-- ACCOUNT_USAGE views lag by up to a few hours; the page says what it reads.
+- ACCOUNT_USAGE views lag by up to a few hours; the page says what it reads. Routine bodies come from the same views (no extra grant, [routines.md](routines.md)).
 
 ## BigQuery (the `bigquery` pack)
 
@@ -85,7 +90,7 @@ Give a service account (or your user, for a trial) these roles on the project:
 
 - `roles/bigquery.jobUser`: run the monitoring queries.
 - `roles/bigquery.resourceViewer`: read `INFORMATION_SCHEMA.JOBS` for every user's jobs.
-- `roles/bigquery.metadataViewer`: table sizes and staleness, with no access to table data.
+- `roles/bigquery.metadataViewer`: table sizes and staleness, with no access to table data. It also carries `bigquery.routines.get`, which the routines section needs ([routines.md](routines.md)).
 
 The connection sets `maximum_bytes_billed` (option `max_bytes_billed`, default 10 GB), so a bad query fails instead of costing money.
 
@@ -94,6 +99,7 @@ The connection sets `maximum_bytes_billed` (option `max_bytes_billed`, default 1
 ```sql
 CREATE LOGIN dea_ro WITH PASSWORD = '<…>';
 GRANT VIEW SERVER STATE TO dea_ro;                        -- blocking chains, running requests
+USE orders;  GRANT VIEW DEFINITION TO dea_ro;             -- routine bodies (sys.sql_modules); see routines.md
 USE orders;  CREATE USER dea_ro FOR LOGIN dea_ro;  ALTER ROLE db_datareader ADD MEMBER dea_ro;
 USE msdb;    CREATE USER dea_ro FOR LOGIN dea_ro;  ALTER ROLE SQLAgentReaderRole ADD MEMBER dea_ro;
 ```
@@ -111,6 +117,7 @@ GRANT USE CATALOG ON CATALOG system TO `dea_ro`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `dea_ro`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.billing  TO `dea_ro`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `dea_ro`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.information_schema TO `dea_ro`;   -- routines and views (routines.md)
 ```
 
 ## Everything else

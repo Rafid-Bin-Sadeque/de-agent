@@ -40,6 +40,8 @@ but is allowed to write freely is worse.
 
 - **A generated map of the live platform.** Read-only collectors snapshot Postgres, Redshift, Airflow, dbt and AWS into timestamped
   pages with signals on top ("dag extract_shop: 2 failed runs in 24h"), and `dea diff` shows what changed since last time.
+- **The code inside your warehouse.** Procedures, functions, views and triggers from every SQL engine are snapshotted (redacted, hashed,
+  diffable) and join the lineage graph: `dea impact proc:analytics.refresh_orders`, `dea diff` shows the changed hunk ([docs/routines.md](docs/routines.md)).
 - **Lineage and a fast lookup, from your code.** Static scanners turn Airflow DAGs (with the shared utilities they call), dbt manifests, SQL files,
   Python scripts, notebooks, pyspark jobs and Terraform into table-level edges:
   `dea impact orders` lists every reader downstream, and `dea find` searches exact identifiers without a vector database.
@@ -198,6 +200,8 @@ in a way the heuristics cannot read (Python scripts that import a driver are sca
 | `dea doctor` | check python, config, sources, psql, FTS5, hook python and vendored parser |
 | `dea snapshot` | collect every source, write `platform/*.md` and `.dea/snapshots` |
 | `dea diff` | what changed since the previous snapshot |
+| `dea schedule print` | print a daily launchd plist or crontab line for `dea snapshot` (prints only; you install it) |
+| `dea export dms-mappings` | CSV of DMS task table mappings from the latest snapshot (no AWS call) |
 | `dea scan` | scan repos into `catalog/` and edges, refresh profile headers and the index |
 | `dea find <term>` | ranked `path:line` hits over pages, catalog and snapshots (exact identifiers first) |
 | `dea edges <table>` / `dea impact <x>` | who writes and reads a table; what a table or util change breaks |

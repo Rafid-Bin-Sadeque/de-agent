@@ -118,6 +118,16 @@ class HubConfig(_Strict):
     map_budget_tokens: int = Field(1500, gt=0, description="Token budget for the generated map.md (the file loaded every session).")
     snapshot_max_age_hours: float = Field(24, gt=0, description="A snapshot older than this is flagged as stale at session start.")
     retention: int = Field(30, ge=1, description="Number of dated snapshots kept per source.")
+    map_file: str = Field("map.md", description="The hub's map page: a relative path inside the hub (no `..`, ends in `.md`). Set it when the map already lives under another name.")
+    session_map: bool = Field(True, description="Inject the map page at session start. Set `false` when the map is already loaded another way (for example a CLAUDE.md import), so it is not loaded twice; due rows and stale-platform rows are still injected.")
+
+    @field_validator("map_file")
+    @classmethod
+    def _map_file(cls, v: str) -> str:
+        parts = v.replace("\\", "/").split("/")
+        if not v.endswith(".md") or v.startswith(("/", "~")) or ".." in parts or re.match(r"^[A-Za-z]:", v):
+            raise ValueError("map_file must be a relative path inside the hub (no `..`) ending in .md")
+        return v
 
 
 class GuardConfig(_Strict):
@@ -315,6 +325,7 @@ class ScanConfig(_Strict):
     target_dir: str = Field("target", description="dbt: directory holding `manifest.json`, relative to `path`.")
     globs: list[str] = Field(default_factory=lambda: ["**/*.sql"], description="sql and python: file globs under `path` (python default: `**/*.py`, `**/*.ipynb`).")
     dialect: str = Field("postgres", description="airflow and python (SQL strings), sql and terraform: sqlglot dialect used to parse SQL.")
+    connections: dict[str, str] = Field(default_factory=dict, description="airflow: Airflow connection id -> de-agent source name, so a `CALL x.y` in a DAG resolves to the live routine of that source.")
 
     @field_validator("name")
     @classmethod
@@ -388,6 +399,12 @@ class Config(_Strict):
         dup = sorted({n for n in scan_names if scan_names.count(n) > 1})
         if dup:
             raise ValueError(f"duplicate scan names: {', '.join(dup)}")
+        for sc in self.scans:
+            if sc.connections and sc.type != "airflow":
+                raise ValueError(f"scan {sc.name}: `connections` is for airflow scans")
+            for conn_id, src in sc.connections.items():
+                if src not in names:
+                    raise ValueError(f"scan {sc.name}: connections.{conn_id} names unknown source {src!r}")
         return self
 
     def source(self, name: str) -> SourceConfig:

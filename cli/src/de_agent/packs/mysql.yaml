@@ -51,3 +51,24 @@ sections:
       order by data_length + index_length desc, 1, 2
       limit 20
     key: [table_schema, table_name]
+  - name: routines
+    sql: |
+      select r.routine_schema as `schema`, r.routine_name as name, lower(r.routine_type) as kind,
+             concat('(', coalesce((select group_concat(lower(p.dtd_identifier) order by p.ordinal_position separator ', ')
+                                   from information_schema.parameters p
+                                   where p.specific_schema = r.routine_schema and p.specific_name = r.specific_name
+                                     and p.routine_type = r.routine_type and p.ordinal_position > 0), ''), ')') as args,
+             lower(r.routine_body) as language, coalesce(lower(r.dtd_identifier), '') as returns,
+             r.definer as owner, r.routine_definition as definition
+      from information_schema.routines r
+      where r.routine_schema not in ('mysql', 'sys', 'information_schema', 'performance_schema')
+      union all
+      select v.table_schema, v.table_name, 'view', '', 'sql', '', v.definer, v.view_definition
+      from information_schema.views v
+      where v.table_schema not in ('mysql', 'sys', 'information_schema', 'performance_schema')
+      union all
+      select t.trigger_schema, t.trigger_name, 'trigger', concat('on ', t.event_object_table), 'sql', '', t.definer, t.action_statement
+      from information_schema.triggers t
+      where t.trigger_schema not in ('mysql', 'sys', 'information_schema', 'performance_schema')
+    key: [schema, name, args]
+    columns: [schema, name, kind, args, language, returns, owner, definition]

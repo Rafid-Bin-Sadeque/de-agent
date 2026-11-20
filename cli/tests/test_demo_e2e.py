@@ -153,6 +153,51 @@ def test_baseline_all_sources_ok_no_signals(stack, hub):
     assert {r["source"] for r in out.results} == {"warehouse", "source", "airflow", "dbt"}
 
 
+ORIG_PROC = """CREATE OR REPLACE PROCEDURE analytics.refresh_orders() LANGUAGE plpgsql AS $$
+BEGIN
+  DELETE FROM analytics.daily_orders WHERE order_date = current_date;
+  INSERT INTO analytics.daily_orders (order_date, orders, revenue)
+  SELECT current_date, count(*), coalesce(sum(total_amount), 0)
+  FROM raw.orders
+  WHERE created_at >= current_date;
+END
+$$;"""
+
+
+def _wh_sql(sql):
+    return sh([*COMPOSE, "exec", "-T", "warehouse", "psql", "-U", "etl", "-d", "warehouse", "-v", "ON_ERROR_STOP=1", "-c", sql])
+
+
+def test_routines_snapshot_scan_impact_and_diff(stack, hub):
+    """v0.3 section 7: snapshot -> scan -> impact shows table -> procedure -> DAG; alter the procedure -> diff shows the hunk."""
+    from de_agent.scanners.edges import callers, downstream
+    from de_agent.scanners.run import run_scan
+
+    text = (hub / "de-agent.yaml").read_text().replace("path: airflow", f"path: {DEMO / 'airflow'}").replace(
+        "path: dbt/acme", f"path: {DEMO / 'dbt' / 'acme'}")
+    (hub / "de-agent.yaml").write_text(text)
+    _wh_sql(ORIG_PROC)
+    out = snap(hub)
+    wh = next(r for r in out.results if r["source"] == "warehouse")
+    rows = {(r["schema"], r["name"]): r for r in wh["data"]["routines"]}
+    assert rows[("analytics", "refresh_orders")]["kind"] == "procedure" and rows[("analytics", "refresh_orders")]["parse"] == "full"
+    assert {rows[("analytics", n)]["kind"] for n in ("order_total", "v_open_orders", "daily_orders_stamp")} >= {"function", "view"}
+    sc = run_scan(hub, load_config(hub / "de-agent.yaml"))
+    assert not sc.errors, sc.errors
+    edges = json.loads((hub / "catalog" / "edges.json").read_text())
+    pid = "proc:warehouse:analytics.refresh_orders"
+    assert pid in {r["reader"] for r in downstream(edges, "raw.orders", 5)}
+    assert "dag:export_daily_orders" in callers(edges, pid)
+    assert any(c["from"] == "dag:export_daily_orders" and c["to"] == pid for c in edges["calls"])
+    try:
+        _wh_sql(ORIG_PROC.replace("WHERE created_at >= current_date;", "WHERE created_at >= current_date AND status <> 'cancelled';"))
+        snap(hub)
+        d = diff_text(hub)
+        assert "routines analytics.refresh_orders.(): body changed" in d and "+  WHERE created_at >= current_date AND status <> 'cancelled';" in d
+    finally:
+        _wh_sql(ORIG_PROC)
+
+
 def _write_observed(name, title, symptom, seen, seconds, diff, notes=""):
     p = DEMO / "faults" / name / "OBSERVED.md"
     body = [f"# {title}: observed", "",

@@ -14,7 +14,7 @@ from typing import Any
 from de_agent.collectors.aws import _aws_core as core
 from de_agent.collectors.base import CollectorError, RunContext
 
-OPTION_KEYS = {"max_metrics", "max_age_h", "max_scan_gb"}
+OPTION_KEYS = {"max_metrics", "max_age_h", "max_scan_gb", "dms_mappings_max"}
 AWS_KEYS = {"profile", "region", "instance_role"}
 SERVICE_KEYS = {
     "dms": set(), "glue": {"jobs", "crawlers", "catalog_databases"}, "s3": {"prefixes"}, "athena": {"workgroups"},
@@ -122,7 +122,8 @@ class AwsCollector:
     schema_version = 1
     list_keys = {
         "dms_instances": ["id"], "dms_tasks": ["id"], "dms_table_issues": ["task", "schema", "table"],
-        "dms_top_tables": ["task", "schema", "table"], "glue_job_runs": ["job", "run_id"], "glue_crawlers": ["name"],
+        "dms_top_tables": ["task", "schema", "table"], "dms_table_mappings": ["task", "schema", "table"],
+        "glue_job_runs": ["job", "run_id"], "glue_crawlers": ["name"],
         "glue_tables": ["database", "name"], "s3_prefixes": ["prefix"], "athena_workgroups": ["workgroup"],
         "athena_top_queries": ["workgroup", "query_id"], "athena_failures": ["workgroup", "query_id"],
         "firehose_streams": ["stream"], "cloudwatch_alarms": ["name"],

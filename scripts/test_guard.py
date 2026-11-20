@@ -328,8 +328,11 @@ def _walk_has_protected(d, root, tpaths):
     return False
 
 
-def protected(arg, cwd):
-    """Is `arg` (a path or glob from a shell command) a dbt test yml or a file under the project's test-paths?"""
+def protected(arg, cwd, below=True):
+    """Is `arg` (a path or glob from a shell command) a dbt test yml or a file under the project's test-paths?
+
+    below=False (paths quoted inside script text): only a path inside a dbt project counts, not a directory or glob that
+    merely has a project somewhere under it, so `*.yml` in a script editing unrelated code is not a dbt test."""
     a = os.path.expanduser(arg.strip().strip("'\""))
     if not a or a.startswith("-") or a in ("/dev/null", "/dev/stdout", "/dev/stderr"):
         return False
@@ -347,7 +350,7 @@ def protected(arg, cwd):
     root = find_project(probe if os.path.exists(probe) else os.path.dirname(probe))
     if root is None:
         # the target may sit above a project (`rm -rf demo/*`, `rm -rf .`): any project below counts
-        if os.path.isdir(probe):
+        if below and os.path.isdir(probe):
             for _dirpath, dirs, files in os.walk(probe):
                 dirs[:] = [x for x in dirs if x not in SKIP_DIRS]
                 if "dbt_project.yml" in files:
@@ -449,7 +452,7 @@ def check_simple(words, cwd, depth=0):
         text = " ".join(args)
         if WRITE_HINT.search(text):
             for pth in PATH_IN_TEXT.findall(text):
-                if protected(pth, cwd):
+                if protected(pth, cwd, below=False):
                     return "rewrites a dbt test file from a script"
     if name in REMOTE and depth < 3:
         # docker compose exec <svc> rm .../schema.yml ; ssh host 'sed -i ...' : paths are not resolvable here

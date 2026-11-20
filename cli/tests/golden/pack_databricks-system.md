@@ -34,3 +34,12 @@ _Pack `databricks-system` v1, sql, validated: fixtures (fixtures only: not yet r
 | statement_id | executed_by | error_message | start_time |
 |---|---|---|---|
 | 01ef-aaaa-0001 | analyst@example.com | [TABLE_OR_VIEW_NOT_FOUND] The table or view `shop`.`orders_v3` cannot be found | 2026-10-01T10:05:00Z |
+
+## Routines
+
+| schema | function | view | total |
+|---|---|---|---|
+| main.shop | 1 | 1 | 2 |
+
+- parse coverage: full 1, heuristic 1, none 0
+- truncated: 0, redacted: 0, without a body: 0

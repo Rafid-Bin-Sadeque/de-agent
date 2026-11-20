@@ -36,6 +36,52 @@ def test_every_collector_query_is_read_only():
         check_read_only(q)
 
 
+def test_routines_query_is_read_only_for_every_kind_mix():
+    for kinds in (["procedure"], ["function"], ["view"], ["materialized_view"], ["trigger"], list(pgc.KINDS)):
+        check_read_only(pgc.q_routines([], kinds, 10))
+        check_read_only(pgc.q_routines(["shop"], kinds, 10))
+
+
+def test_routines_section_unit(tmp_path):
+    from de_agent.routines import RoutineStore
+
+    raw = [{"schema": "shop", "name": "f", "kind": "function", "args": "(integer)", "language": "sql",
+            "returns": "integer", "owner": "o", "body_bytes": 12, "definition": "select 1  \r\n"}]
+    res = run_source(_source(), query_fn=_fake([("pg_get_functiondef", raw)]), routine_store=RoutineStore(tmp_path))
+    (row,) = res["data"]["routines"]
+    assert row["kind"] == "function" and row["body_bytes"] == 12 and "definition" not in row
+    assert RoutineStore(tmp_path).get(row["body_hash"]) == "select 1"
+
+
+def test_routines_view_bodies_fall_back_on_lock_timeout():
+    calls = []
+
+    def fn(conn, sql, exec_target, timeout_s):
+        if "pg_get_functiondef" in sql:
+            calls.append("pg_get_viewdef" in sql)
+            if "pg_get_viewdef" in sql:
+                raise CollectorError("canceling statement due to lock timeout")
+            return [{"schema": "s", "name": "v", "kind": "view", "definition": ""}]
+        return []
+
+    res = run_source(_source(), query_fn=fn)
+    assert calls == [True, False] and not [e for e in res["errors"] if e.startswith("routines")]
+    assert res["data"]["meta"]["routine_view_bodies_skipped"] is True and len(res["data"]["routines"]) == 1
+
+
+def test_routines_option_off_and_cap_and_validation():
+    log = []
+    res = run_source(_source(routines="false"), query_fn=_fake([], log))
+    assert "routines" not in res["data"] and not any("pg_get_functiondef" in q for q in log)
+    over = [{"schema": "s", "name": f"n{i}", "kind": "view", "definition": "select 1"} for i in range(3)]
+    res = run_source(_source(routines_max=2), query_fn=_fake([("pg_get_functiondef", over)]))
+    assert "routines" not in res["data"] and any(e.startswith("routines:") and "routines_max" in e for e in res["errors"])
+    res = run_source(_source(), query_fn=_fake([("pg_get_functiondef", CollectorError("permission denied"))]))
+    assert "routines: permission denied" in res["errors"]
+    with pytest.raises(Exception, match="routine_kinds"):
+        _source(routine_kinds="[bogus]")
+
+
 def test_long_queries_only_counts_active_sessions():
     sql = pgc.q_long_queries(300)
     assert "state = 'active'" in sql and "state <> 'idle'" not in sql
@@ -179,6 +225,20 @@ def pg(request):
                         "from generate_series(1, 300000) g")
             cur.execute("create index orders_note_idx on shop.orders(note)")  # ~20 MB, never scanned
             cur.execute("delete from shop.orders where id % 5 in (0, 1)")      # 40% dead tuples
+            cur.execute("create function shop.order_total(int) returns numeric language sql as "
+                        "$$ select sum(amount) from shop.orders where customer_id = $1 $$")
+            cur.execute("create function shop.order_total(int, text) returns numeric language sql as "
+                        "$$ select 1::numeric $$")
+            cur.execute("create function shop.leaky() returns text language sql as "
+                        "$$ select 'postgres://svc:s3cretpw@db.internal/x' $$")
+            cur.execute("create procedure shop.refresh_stats() language plpgsql as "
+                        "$$ begin delete from shop.customers where id < 0; end $$")
+            cur.execute("create function shop.trg_fn() returns trigger language plpgsql as "
+                        "$$ begin return new; end $$")
+            cur.execute("create trigger orders_note_trg before insert on shop.orders "
+                        "for each row execute function shop.trg_fn()")
+            cur.execute("create view shop.big_orders as select id, amount from shop.orders where amount > 100")
+            cur.execute("create materialized view shop.mv_customers as select count(*) as c from shop.customers")
             cur.execute("select pg_create_logical_replication_slot('cdc_slot', 'test_decoding')")
             for _ in range(30):  # wait for the stats to flush
                 cur.execute("select n_dead_tup from pg_stat_user_tables where relname = 'orders'")
@@ -241,6 +301,52 @@ def test_collector_all_sections_populated(pg, monkeypatch):
 
 
 @pytest.mark.integration
+def test_routines_section_live(pg, monkeypatch, tmp_path):
+    from de_agent.routines import RoutineStore
+
+    src = _pg_source(pg, monkeypatch)
+    res = run_source(src, routine_store=RoutineStore(tmp_path))
+    assert res["errors"] == [], res["errors"]
+    rows = {(r["name"], r["args"]): r for r in res["data"]["routines"]}
+    assert set(rows) == {
+        ("order_total", "(integer)"), ("order_total", "(integer, text)"), ("leaky", "()"), ("refresh_stats", "()"),
+        ("trg_fn", "()"), ("orders_note_trg", "on orders"), ("big_orders", ""), ("mv_customers", ""),
+    }, sorted(rows)
+    assert rows[("refresh_stats", "()")]["kind"] == "procedure" and rows[("refresh_stats", "()")]["language"] == "plpgsql"
+    assert rows[("order_total", "(integer)")]["returns"] == "numeric"
+    assert rows[("trg_fn", "()")]["returns"] == "trigger"
+    assert rows[("big_orders", "")]["kind"] == "view" and rows[("mv_customers", "")]["kind"] == "materialized_view"
+    assert rows[("orders_note_trg", "on orders")]["kind"] == "trigger"
+    assert all(r["owner"] == "postgres" for r in rows.values())
+    store = RoutineStore(tmp_path)
+    body = store.get(rows[("refresh_stats", "()")]["body_hash"])
+    assert "CREATE OR REPLACE PROCEDURE shop.refresh_stats()" in body and "delete from shop.customers" in body
+    assert "shop.orders" in store.get(rows[("big_orders", "")]["body_hash"])
+    assert "EXECUTE FUNCTION shop.trg_fn()" in store.get(rows[("orders_note_trg", "on orders")]["body_hash"])
+    leaky = rows[("leaky", "()")]
+    assert leaky["redacted"] and "s3cretpw" not in store.get(leaky["body_hash"])
+    assert "s3cretpw" not in json.dumps(res)
+    # system and extension objects are excluded: nothing outside the shop schema
+    assert {r["schema"] for r in res["data"]["routines"]} == {"shop"}
+    again = run_source(src, routine_store=RoutineStore(tmp_path))["data"]["routines"]
+    assert [r["body_hash"] for r in again] == [r["body_hash"] for r in res["data"]["routines"]]  # deterministic
+
+
+@pytest.mark.integration
+def test_routines_all_schemas_excludes_system(pg, monkeypatch):
+    cfg = parse_config(
+        "sources:\n  - name: wh\n    type: postgres\n    timeout_seconds: 60\n"
+        f"    conn: {{host: 127.0.0.1, port: {pg['port']}, dbname: shop, user: readonly_agent, "
+        "password: \"env:DEA_TEST_PG_PW\", sslmode: disable}\n"
+        "    options: {top_tables: 3}\n")
+    monkeypatch.setenv("DEA_TEST_PG_PW", pg["ro_pw"])
+    res = run_source(cfg.sources[0])
+    assert res["errors"] == [], res["errors"]
+    schemas = {r["schema"] for r in res["data"]["routines"]}
+    assert schemas == {"shop"}, schemas  # no pg_catalog / information_schema / extension objects
+
+
+@pytest.mark.integration
 @pytest.mark.skipif(not shutil.which("psql"), reason="psql not installed")
 def test_collector_same_result_via_psql_backend(pg, monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "psycopg", None)  # force the psql CLI backend
@@ -283,6 +389,10 @@ def test_collector_degrades_instead_of_hanging_when_a_table_is_exclusively_locke
         assert res["errors"] == [], res["errors"]
         d = res["data"]
         assert d["meta"]["sizes_estimated"] == ["schemas", "tables"]
+        # pg_get_viewdef locks what the view reads: the matview over customers is listed without a body, the rest is intact
+        assert d["meta"]["routine_view_bodies_skipped"] is True
+        rt = {r["name"]: r for r in d["routines"]}
+        assert rt["mv_customers"]["body_hash"] == "" and rt["refresh_stats"]["body_hash"] != ""
         assert any(t["name"] == "customers" for t in d["tables"])
         assert len(d["blocking"]) == 1 and "customers" in d["blocking"][0]["blocked_query"]
         sig = signals_for(res)
@@ -326,3 +436,12 @@ def test_dea_query_pg_stat_activity_types_and_column_named_q(pg, monkeypatch):
             json.dumps(rows, default=str)
     rows, _ = query_limited(src.conn, "select 'x'::text q", "local", 30, 5)
     assert rows == [{"q": "x"}]
+
+
+def test_nolock_size_math_is_bigint():
+    """relpages is int4: relpages * 8192 overflows for tables over 2 GB unless cast first."""
+    from de_agent.collectors import postgres as pgc
+
+    sql = pgc.q_tables_nolock(["public"], 10)
+    assert "relpages * 8192" not in sql
+    assert sql.count("c.relpages::bigint * 8192") == 2

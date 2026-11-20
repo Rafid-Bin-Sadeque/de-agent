@@ -19,7 +19,8 @@ CASES = yaml.safe_load((Path(__file__).parent / "corpus" / "redteam.yaml").read_
 
 def run_hook(guard, payload, project_dir, env_extra=None, cwd=None):
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(project_dir), CLAUDE_PLUGIN_ROOT=str(ROOT),
-               XDG_CONFIG_HOME=str(Path(project_dir) / ".xdg"))
+               XDG_CONFIG_HOME=str(Path(project_dir) / ".xdg"), HOME=str(Path(project_dir) / ".home"))
+    env.pop("DEA_HUB", None)  # no real user config or hub leaks into a hook run
     env.pop("DEA_ALLOW_PLUGIN_EDITS", None)
     env.update(env_extra or {})
     p = subprocess.run([HOOK_PYTHON, str(ROOT / "scripts" / GUARDS[guard])], input=json.dumps(payload),

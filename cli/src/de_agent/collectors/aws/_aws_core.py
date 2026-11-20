@@ -22,6 +22,8 @@ MAX_PARTITIONS = 5000
 DEFAULT_MAX_METRICS = 300
 GMD_BATCH = 500  # GetMetricData accepts up to 500 queries per call
 TOP_N = 10
+DMS_STATS_CAP = 200000  # table statistics per task (the mapping list needs every table, not a top-N)
+DEFAULT_DMS_MAPPINGS_MAX = 5000
 S3_METRIC_WINDOW_H = 72  # BucketSizeBytes / NumberOfObjects are daily metrics
 
 # ---- read-only guard ---------------------------------------------------------------------------------------------
@@ -329,7 +331,75 @@ def _rules(table_mappings):
     return out
 
 
-def gather_dms(session, cfg, now, metrics, errors):
+def _like(pattern, value):
+    """DMS object-locator match: `%` is a wildcard, everything else is literal and case-sensitive."""
+    rx = ".*".join(re.escape(part) for part in str(pattern if pattern is not None else "%").split("%"))
+    return re.fullmatch(rx, str(value or ""), re.S) is not None
+
+
+def _transform(rule, name):
+    """Apply one DMS schema/table transformation rule to a name; unknown actions leave it unchanged."""
+    action, val = rule.get("action"), rule.get("value")
+    if name is None:
+        return name
+    if action == "rename" and val is not None:
+        return val
+    if action == "convert-lowercase":
+        return name.lower()
+    if action == "convert-uppercase":
+        return name.upper()
+    if action == "add-prefix" and val is not None:
+        return val + name
+    if action == "add-suffix" and val is not None:
+        return name + val
+    if action == "remove-prefix" and val and name.startswith(val):
+        return name[len(val):]
+    if action == "remove-suffix" and val and name.endswith(val):
+        return name[:-len(val)]
+    return name
+
+
+def dms_mapping_rows(task, rules, stat_rows, source_ep, target_ep):
+    """Tables a task's selection rules include, after excludes and schema/table transformation rules, as plain rows.
+
+    Explicit include rules give their table directly; wildcard includes (`%`) are resolved from the task's table
+    statistics, and one row with `table` = the pattern and `(unresolved)` is kept when nothing matches."""
+    found = {}  # (schema, table) -> rule label; explicit wins over wildcard
+    for r in rules:
+        if r.get("type") != "selection" or r.get("action") not in ("include", "explicit"):
+            continue
+        sp, tp = r.get("schema"), r.get("table")
+        if sp is not None and tp is not None and "%" not in sp and "%" not in tp:
+            found[(sp, tp)] = "explicit"
+            continue
+        label = "wildcard %s.%s" % (sp if sp is not None else "%", tp if tp is not None else "%")
+        hits = [(s.get("SchemaName"), s.get("TableName")) for s in stat_rows
+                if _like(sp, s.get("SchemaName")) and _like(tp, s.get("TableName"))]
+        for key in hits:
+            found.setdefault(key, label)
+        if not hits:
+            found.setdefault((sp if sp is not None else "%", tp if tp is not None else "%"), label + " (unresolved)")
+    excludes = [r for r in rules if r.get("type") == "selection" and r.get("action") == "exclude"]
+    rows = []
+    for (sch, tbl), label in found.items():
+        if any(_like(x.get("schema"), sch) and _like(x.get("table"), tbl) for x in excludes):
+            continue
+        tgt_s, tgt_t = sch, tbl
+        for r in rules:
+            if r.get("type") != "transformation" or r.get("target") not in ("schema", "table"):
+                continue
+            if not _like(r.get("schema"), sch) or (r.get("target") == "table" and not _like(r.get("table"), tbl)):
+                continue
+            if r.get("target") == "schema":
+                tgt_s = _transform(r, tgt_s)
+            else:
+                tgt_t = _transform(r, tgt_t)
+        rows.append({"task": task, "schema": sch, "table": tbl, "target_schema": tgt_s, "target_table": tgt_t,
+                     "rule": label, "source_endpoint": source_ep, "target_endpoint": target_ep})
+    return sorted(rows, key=lambda r: (str(r["schema"]), str(r["table"])))
+
+
+def gather_dms(session, cfg, now, metrics, errors, opts=None, truncated=None):
     dms = session.client("dms")
     out = {}
     try:
@@ -407,7 +477,12 @@ def gather_dms(session, cfg, now, metrics, errors):
                "folder": s3.get("BucketFolder")}
         return {k: v for k, v in row.items() if v}
 
-    trows, issues, top = [], [], []
+    def endpoint_id(arn):
+        e = endpoints.get(arn)
+        return (e.get("EndpointIdentifier") if e else None) or _arn_tail(arn) or None
+
+    mappings_max = int((opts or {}).get("dms_mappings_max", DEFAULT_DMS_MAPPINGS_MAX))
+    trows, issues, top, mapping = [], [], [], []
     for t in tasks:
         tid = t.get("ReplicationTaskIdentifier")
         stats = t.get("ReplicationTaskStats") or {}
@@ -427,12 +502,16 @@ def gather_dms(session, cfg, now, metrics, errors):
             "rules": _rules(t.get("TableMappings")),
         }
         try:
-            stat_rows, _ = _paginate(dms, "describe_table_statistics", "TableStatistics", 10000,
-                                     ReplicationTaskArn=t.get("ReplicationTaskArn"),
-                                     PaginationConfig={"PageSize": 500})
+            stat_rows, stat_trunc = _paginate(dms, "describe_table_statistics", "TableStatistics", DMS_STATS_CAP,
+                                              ReplicationTaskArn=t.get("ReplicationTaskArn"),
+                                              PaginationConfig={"PageSize": 500})
+            if stat_trunc and truncated is not None and "dms_table_mappings" not in truncated:
+                truncated.append("dms_table_mappings")
         except Exception as ex:
             errors.append("dms.table_statistics %s: %s" % (tid, describe_error(ex)))
             stat_rows = []
+            if truncated is not None and "dms_table_mappings" not in truncated:
+                truncated.append("dms_table_mappings")  # wildcards unresolved: the list is partial, not shrunk
         n_susp = 0
         cand = []
         for s in stat_rows:
@@ -446,6 +525,8 @@ def gather_dms(session, cfg, now, metrics, errors):
             cand.append(dict(base, state=state, cdc_changes=changes, inserts=int(s.get("Inserts") or 0),
                              updates=int(s.get("Updates") or 0), deletes=int(s.get("Deletes") or 0),
                              ddls=int(s.get("Ddls") or 0), full_load_rows=int(s.get("FullLoadRows") or 0)))
+        mapping += dms_mapping_rows(tid, row["rules"], stat_rows, endpoint_id(t.get("SourceEndpointArn")),
+                                    endpoint_id(t.get("TargetEndpointArn")))
         row["tables_suspended"] = n_susp
         row["tables_total"] = len(stat_rows)
         top += sorted(cand, key=lambda r: (-r["cdc_changes"], str(r["schema"]), str(r["table"])))[:TOP_N]
@@ -453,6 +534,12 @@ def gather_dms(session, cfg, now, metrics, errors):
     out["dms_tasks"] = sorted(trows, key=lambda r: str(r["id"]))
     out["dms_table_issues"] = sorted(issues, key=lambda r: (str(r["task"]), str(r["schema"]), str(r["table"])))
     out["dms_top_tables"] = sorted(top, key=lambda r: (str(r["task"]), -r["cdc_changes"], str(r["table"])))
+    mapping.sort(key=lambda r: (str(r["task"]), str(r["schema"]), str(r["table"])))
+    if len(mapping) > mappings_max:
+        mapping = mapping[:mappings_max]
+        if truncated is not None and "dms_table_mappings" not in truncated:
+            truncated.append("dms_table_mappings")
+    out["dms_table_mappings"] = mapping
     return out, trunc or ttrunc
 
 
@@ -744,7 +831,7 @@ def gather(cfg, session=None, now=None):
     metrics = Metrics(session, now, WINDOW_H, cap)
     if "dms" in services:
         try:
-            part, trunc = gather_dms(session, services["dms"] or {}, now, metrics, errors)
+            part, trunc = gather_dms(session, services["dms"] or {}, now, metrics, errors, opts, truncated)
             data.update(part)
             if trunc:
                 truncated.append("dms")

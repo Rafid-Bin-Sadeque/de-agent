@@ -122,6 +122,14 @@ def postgres_signals(data: dict[str, Any]) -> list[str]:
     return sig
 
 
+def _routines_part(data: dict[str, Any]) -> list[str]:
+    if data.get("routines") is None:
+        return []
+    from de_agent.routines_render import routines_block
+
+    return routines_block(data["routines"], data.get("meta"), data.get("_routine_changes"), bool(data.get("_routine_pages")))
+
+
 def _postgres_body(data: dict[str, Any]) -> list[str]:
     out: list[str] = []
     s = data.get("server")
@@ -189,6 +197,7 @@ def _postgres_body(data: dict[str, Any]) -> list[str]:
         out += ["## Top statements (pg_stat_statements)", ""] + _table(["query", "calls", "total ms", "mean ms"], [
             [str(r.get("query", ""))[:100], _num(r.get("calls")), _num(r.get("total_exec_ms")), _num(r.get("mean_exec_ms"))]
             for r in ts]) + [""]
+    out += _routines_part(data)
     return out
 
 
@@ -554,6 +563,7 @@ def _redshift_body(data: dict[str, Any]) -> list[str]:
         if trunc:
             out += [f"The workload single pass hit its {_num(trunc)}-group cap: the smallest groups by exec time are missing, "
                     "so counts and exec time are a lower bound.", ""]
+    out += _routines_part(data)
     return out
 
 
@@ -595,6 +605,14 @@ def aws_signals(data: dict[str, Any]) -> list[str]:
         err, susp = int(t.get("tables_errored") or 0), int(t.get("tables_suspended") or 0)
         if err or susp:
             sig.append(f"dms task {tid}: {err} table(s) errored, {susp} suspended")
+    owners: dict[tuple, list[str]] = {}
+    for m in data.get("dms_table_mappings") or []:
+        if "(unresolved)" in str(m.get("rule")):
+            continue
+        owners.setdefault((m.get("target_endpoint"), m.get("target_schema"), m.get("target_table")), []).append(str(m["task"]))
+    for (ep, sch, tbl), ts in sorted(owners.items(), key=lambda kv: str(kv[0])):
+        if len(set(ts)) > 1:
+            sig.append(f"dms target {ep}.{sch}.{tbl} is written by {len(set(ts))} tasks ({', '.join(sorted(set(ts)))})")
     for i in sorted(data.get("dms_instances") or [], key=lambda r: str(r.get("id"))):
         mem = i.get("free_mem_min_pct")
         if isinstance(mem, (int, float)) and mem < DMS_MEM_PCT:
@@ -680,6 +698,15 @@ def aws_service_blocks(data: dict[str, Any]) -> dict[str, list[str]]:
               f"{_num(r.get('tables_errored'))} / {_num(r.get('tables_suspended'))}",
               (f"{_ts(r.get('last_failure_at'))}: {str(r['last_failure_message'])[:80]}" if r.get("last_failure_message") else "-")]
              for r in dt]) + [""])
+    tm = data.get("dms_table_mappings")
+    if tm:
+        per: dict[str, list[int]] = {}
+        for r in tm:
+            c = per.setdefault(str(r["task"]), [0, 0])
+            c[0] += 1
+            c[1] += str(r.get("rule", "")).startswith("wildcard")
+        add("dms", ["### Table mappings", ""] + [f"- {t}: {n} tables ({k} via wildcard)" for t, (n, k) in sorted(per.items())]
+            + ["", "The full task -> table list is in the snapshot JSON (`dea export dms-mappings` writes it as CSV).", ""])
     ti = data.get("dms_table_issues")
     if ti:
         add("dms", ["### Errored / suspended tables", ""] + _table(["task", "table", "state"], [
@@ -764,9 +791,21 @@ def _frontmatter(result: dict[str, Any], extra: str = "") -> list[str]:
             f"generated: {result['collected_at']}", f"schema_version: {result['schema_version']}", "---", ""]
 
 
-def render_pages(result: dict[str, Any]) -> dict[str, str]:
+def render_pages(result: dict[str, Any], prior: dict[str, Any] | None = None, store: Any = None,
+                 edges: dict[str, Any] | None = None) -> dict[str, str]:
     """{path relative to platform/: markdown}. One page, unless an AWS page passes SPLIT_OVER lines: then an index plus
-    one page per service under platform/<source>/."""
+    one page per service under platform/<source>/. With a routine `store`, one page per routine joins the source's page
+    (`<source>/routines/<schema>.<name>.md`); `prior` is the previous snapshot's result (changed routines)."""
+    rows = (result.get("data") or {}).get("routines")
+    if rows is not None:
+        from de_agent.routines_render import routine_changes, routine_pages
+
+        prev_rows = ((prior or {}).get("data") or {}).get("routines") if prior else None
+        text = render(result, routine_changes(prev_rows, rows) if prior else None, store is not None)
+        pages = {f"{result['source']}.md": text}
+        if store is not None:
+            pages.update(routine_pages(result, store, edges))
+        return pages
     text = render(result)
     if result.get("type") != "aws" or text.count("\n") <= SPLIT_OVER:
         return {f"{result['source']}.md": text}
@@ -825,8 +864,10 @@ def signals_for(result: dict[str, Any]) -> list[str]:
     return fn(result.get("data") or {}) if fn else []
 
 
-def render(result: dict[str, Any]) -> str:
+def render(result: dict[str, Any], routine_changes: dict[str, list[str]] | None = None, routine_pages: bool = False) -> str:
     data = result.get("data") or {}
+    if data.get("routines") is not None and (routine_changes is not None or routine_pages):
+        data = {**data, "_routine_changes": routine_changes, "_routine_pages": routine_pages}
     body_fn: Callable[[dict[str, Any]], list[str]] | None = BODIES.get(result.get("type", ""))
     lines = [
         "---",

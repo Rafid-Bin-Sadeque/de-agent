@@ -42,7 +42,9 @@ def fts5_available() -> bool:
         return False
 
 
-def kind_of(rel: str) -> str:
+def kind_of(rel: str, map_file: str = "map.md") -> str:
+    if rel == map_file:
+        return "map"
     parts = rel.split("/")
     if len(parts) == 1:
         return {"map.md": "map", "status.md": "status", "conventions.md": "conventions"}.get(rel, "other")
@@ -57,6 +59,16 @@ def _title(rel: str, text: str) -> str:
     return Path(rel).stem
 
 
+def _map_file(hub: Path) -> str:
+    """`hub.map_file` from de-agent.yaml; an unreadable or invalid config means the default."""
+    try:
+        from de_agent.config import load_config
+
+        return load_config(hub / "de-agent.yaml").hub.map_file
+    except Exception:
+        return "map.md"
+
+
 def split_ident(text: str) -> str:
     return text.translate(SPLIT_TR)
 
@@ -69,6 +81,7 @@ class FindIndex:
     def __init__(self, hub: Path) -> None:
         self.hub = hub
         self.db_path = hub / ".dea" / "index.db"
+        self.map_file = _map_file(hub)
 
     def _files(self) -> dict[str, tuple[int, int]]:
         found: dict[str, tuple[int, int]] = {}
@@ -109,7 +122,7 @@ class FindIndex:
                 except OSError:
                     continue
                 con.execute("insert into docs(path, kind, title, body, body_split) values (?,?,?,?,?)",
-                            (rel, kind_of(rel), _title(rel, text), text, split_ident(text)))
+                            (rel, kind_of(rel, self.map_file), _title(rel, text), text, split_ident(text)))
                 con.execute("insert into files(path, mtime_ns, size) values (?,?,?)", (rel, *current[rel]))
             con.commit()
             return len(changed)
@@ -190,12 +203,13 @@ def linear_search(hub: Path, query: str, limit: int = 10) -> list[Hit]:
     warnings.warn("SQLite FTS5 is unavailable; falling back to a slow linear scan", stacklevel=2)
     terms = query_terms(query)
     scored: list[tuple[int, str, str]] = []
-    for rel in sorted(FindIndex(hub)._files()):
+    idx = FindIndex(hub)
+    for rel in sorted(idx._files()):
         text = (hub / rel).read_text(encoding="utf-8", errors="replace")
         hay = (split_ident(text) + " " + text).lower()
         n = sum(hay.count(t.lower()) for t in terms)
         if n:
-            scored.append((-n, rel, kind_of(rel)))
+            scored.append((-n, rel, kind_of(rel, idx.map_file)))
     scored.sort()
     out = []
     for neg, rel, kind in scored[:limit]:

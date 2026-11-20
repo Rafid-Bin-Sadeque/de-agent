@@ -1733,3 +1733,44 @@
   kind:
   - read
   - write
+- sql: "select \"schema\", name, kind, args, language, returns, owner, octet_length(def) as body_bytes, def as definition\nfrom (\nselect n.nspname::text as \"schema\", p.proname::text as name,\n       case p.prokind when 'p' then 'procedure' else 'function' end as kind,\n       '(' || oidvectortypes(p.proargtypes) || ')' as args,\n       l.lanname::text as language,\n       coalesce(pg_get_function_result(p.oid), '') as returns,\n       pg_get_userbyid(p.proowner)::text as owner,\n       case when l.lanname in ('internal', 'c') then '' else pg_get_functiondef(p.oid) end as def\nfrom pg_proc p\njoin pg_namespace n on n.oid = p.pronamespace\njoin pg_language l on l.oid = p.prolang\nwhere p.prokind in ('p', 'f') and n.nspname in ('shop')\n  and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')\nunion all\nselect n.nspname::text, c.relname::text,\n       case c.relkind when 'm' then 'materialized_view' else 'view' end,\n   \
+    \    '', 'sql', '', pg_get_userbyid(c.relowner)::text, pg_get_viewdef(c.oid)\nfrom pg_class c\njoin pg_namespace n on n.oid = c.relnamespace\nwhere c.relkind in ('v', 'm') and n.nspname in ('shop')\n  and not exists (select 1 from pg_depend d where d.classid = 'pg_class'::regclass and d.objid = c.oid and d.deptype = 'e')\nunion all\nselect n.nspname::text, t.tgname::text, 'trigger', 'on ' || c.relname::text, '', '',\n       pg_get_userbyid(c.relowner)::text, pg_get_triggerdef(t.oid)\nfrom pg_trigger t\njoin pg_class c on c.oid = t.tgrelid\njoin pg_namespace n on n.oid = c.relnamespace\nwhere not t.tgisinternal and n.nspname in ('shop')\n) r(\"schema\", name, kind, args, language, returns, owner, def)\norder by 1, 2, 4, 3\nlimit 5001"
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: "select \"schema\", name, kind, args, language, returns, owner, octet_length(def) as body_bytes, def as definition\nfrom (\nselect n.nspname::text, c.relname::text,\n       case c.relkind when 'm' then 'materialized_view' else 'view' end,\n       '', 'sql', '', pg_get_userbyid(c.relowner)::text, pg_get_viewdef(c.oid)\nfrom pg_class c\njoin pg_namespace n on n.oid = c.relnamespace\nwhere c.relkind in ('v') and left(n.nspname, 3) <> 'pg_' and n.nspname <> 'information_schema'\n  and not exists (select 1 from pg_depend d where d.classid = 'pg_class'::regclass and d.objid = c.oid and d.deptype = 'e')\n) r(\"schema\", name, kind, args, language, returns, owner, def)\norder by 1, 2, 4, 3\nlimit 5001"
+  dialect: postgres
+  kind: read
+  type: SELECT
+- sql: "select n.nspname as \"schema\", p.proname as name, 'procedure' as kind,\n       '(' || oidvectortypes(p.proargtypes) || ')' as args, l.lanname as language, '' as returns,\n       trim(u.usename) as owner, p.prosrc as definition, p.proargnames::varchar(4096) as argnames\nfrom pg_proc_info p\njoin pg_namespace n on n.oid = p.pronamespace\njoin pg_language l on l.oid = p.prolang\nleft join pg_user u on u.usesysid = p.proowner\nwhere p.prokind = 'p' and left(n.nspname, 3) <> 'pg_' and n.nspname <> 'information_schema'\norder by 1, 2, 4\nlimit 5001"
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: "select n.nspname as \"schema\", p.proname as name, 'procedure' as kind,\n       '()' as args, l.lanname as language, '' as returns,\n       trim(u.usename) as owner, p.prosrc as definition, p.proargnames::varchar(4096) as argnames\nfrom pg_proc_info p\njoin pg_namespace n on n.oid = p.pronamespace\njoin pg_language l on l.oid = p.prolang\nleft join pg_user u on u.usesysid = p.proowner\nwhere p.prokind = 'p' and left(n.nspname, 3) <> 'pg_' and n.nspname <> 'information_schema'\norder by 1, 2, 4\nlimit 5001"
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: "select n.nspname as \"schema\", p.proname as name, 'function' as kind,\n       '(' || oidvectortypes(p.proargtypes) || ')' as args, l.lanname as language,\n       format_type(p.prorettype, null) as returns, trim(u.usename) as owner, p.prosrc as definition,\n       p.proargnames::varchar(4096) as argnames\nfrom pg_proc p\njoin pg_namespace n on n.oid = p.pronamespace\njoin pg_language l on l.oid = p.prolang\nleft join pg_user u on u.usesysid = p.proowner\nwhere l.lanname in ('sql', 'plpythonu', 'exfunc') and left(n.nspname, 3) <> 'pg_' and n.nspname <> 'information_schema'\norder by 1, 2, 4\nlimit 5001"
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: "select v.schemaname as \"schema\", v.viewname as name, 'view' as kind, '' as args, 'sql' as language, '' as returns,\n       trim(v.viewowner) as owner, v.definition as definition\nfrom pg_views v\nwhere left(v.schemaname, 3) <> 'pg_' and v.schemaname <> 'information_schema'\norder by 1, 2\nlimit 5001"
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: 'select trim(schema_name) as "schema", trim(name) as name, trim(user_name) as owner
+
+    from svv_mv_info
+
+    order by 1, 2'
+  dialect: redshift
+  kind: read
+  type: SELECT
+- sql: show procedure "acme"."load_day"(date, integer)
+  dialect: redshift
+  kind: read
+  type: SHOW
+- sql: select pg_get_viewdef('"acme"."mv_hidden"'::regclass, true) as definition
+  dialect: redshift
+  kind: read
+  type: SELECT

@@ -93,6 +93,13 @@ def pg16():
             cur.execute("insert into shop.locked_t values (1, 'a'), (2, 'b')")
             cur.execute("delete from shop.orders where id % 5 in (0, 1)")  # 40% dead tuples
             cur.execute("analyze shop.orders")
+            cur.execute("create function shop.order_total(int) returns numeric language sql as "
+                        "$$ select sum(amount) from shop.orders $$")
+            cur.execute("create procedure shop.refresh_orders() language plpgsql as "
+                        "$$ begin delete from shop.locked_t where false; end $$")
+            cur.execute("create view shop.big_orders as select id, amount from shop.orders where amount > 100")
+            cur.execute("create function shop.trg_fn() returns trigger language plpgsql as $$ begin return new; end $$")
+            cur.execute("create trigger orders_trg before insert on shop.orders for each row execute function shop.trg_fn()")
             for _ in range(30):
                 cur.execute("select n_dead_tup from pg_stat_user_tables where relname = 'orders'")
                 if (cur.fetchone() or [0])[0] > 0:
@@ -131,7 +138,13 @@ def test_postgres_lite_runs_every_section_against_pg16(pg16, monkeypatch):
     res = run_source(_pg_source(pg16, monkeypatch))
     assert res["errors"] == [], res["errors"]
     d = res["data"]
-    assert set(d) - {"meta"} == {"long_running_sessions", "blocked_sessions", "dead_tuples", "table_sizes"}
+    assert set(d) - {"meta"} == {"long_running_sessions", "blocked_sessions", "dead_tuples", "table_sizes", "routines"}
+    rt = {(r["name"], r["kind"]): r for r in d["routines"]}
+    assert {("refresh_orders", "procedure"), ("order_total", "function"), ("big_orders", "view"),
+            ("orders_trg", "trigger"), ("trg_fn", "function")} <= set(rt), sorted(rt)
+    assert all(r["schema"] == "shop" for r in d["routines"])  # no pg_catalog / information_schema / extension objects
+    assert rt[("refresh_orders", "procedure")]["language"] == "plpgsql" and "definition" not in rt[("refresh_orders", "procedure")]
+    assert len(rt[("big_orders", "view")]["body_hash"]) == 64
     orders = next(t for t in d["dead_tuples"] if t["table"] == "orders")
     assert orders["n_dead_tup"] >= 50000 and orders["dead_pct"] >= 20
     assert any(t["table"] == "locked_t" for t in d["table_sizes"])  # an ACCESS EXCLUSIVE lock does not block the size section
@@ -194,7 +207,15 @@ def mysql84():
         cur = root.cursor()
         cur.execute("create table orders (id int primary key, note varchar(50), amount int) engine=innodb")
         cur.execute("insert into orders values (1, 'a', 10), (2, 'b', 20), (3, 'c', 30)")
+        cur.execute("create procedure refresh_orders() begin insert into orders select 9, 'x', 1 from dual where false; end")
+        cur.execute("create function order_total(a int) returns int deterministic return a * 2")
+        cur.execute("create view big_orders as select id from orders where amount > 10")
+        cur.execute("create trigger orders_bi before insert on orders for each row set new.note = 'n'")
         cur.execute(f"create user 'mon'@'%' identified by '{mon_pw}'")
+        cur.execute("grant show_routine on *.* to 'mon'@'%'")
+        cur.execute("grant show view, trigger on shop.* to 'mon'@'%'")  # triggers are listed only with TRIGGER (docs/routines.md)
+        cur.execute(f"create user 'mon_nopriv'@'%' identified by '{mon_pw}'")
+        cur.execute("grant select on shop.* to 'mon_nopriv'@'%'")
         cur.execute("grant process, replication client on *.* to 'mon'@'%'")
         cur.execute("grant select on shop.* to 'mon'@'%'")
         cur.execute("grant select, execute on sys.* to 'mon'@'%'")
@@ -225,12 +246,33 @@ def test_mysql_pack_runs_every_section_against_mysql_84(mysql84, monkeypatch):
     res = run_source(_my_source(mysql84, monkeypatch))
     assert res["errors"] == [], res["errors"]
     d = res["data"]
-    assert set(d) - {"meta"} == {"long_processlist", "innodb_lock_waits", "replica_status", "top_tables"}
+    assert set(d) - {"meta"} == {"long_processlist", "innodb_lock_waits", "replica_status", "top_tables", "routines"}
+    rt = {(r["name"], r["kind"]): r for r in d["routines"]}
+    assert {("refresh_orders", "procedure"), ("order_total", "function"), ("big_orders", "view"),
+            ("orders_bi", "trigger")} <= set(rt), sorted(rt)
+    assert all(r["schema"] == "shop" for r in d["routines"]) and "definition" not in rt[("big_orders", "view")]
+    assert rt[("order_total", "function")]["args"] == "(int)" and rt[("order_total", "function")]["returns"] == "int"
+    assert all(r["body_hash"] for r in d["routines"]), d["routines"]  # SHOW_ROUTINE + SHOW VIEW: every body came back
+    assert not any("without a body" in x for x in signals_for(res))
     assert d["replica_status"] == []  # a primary has no replica status: empty, not an error
     assert any(t["table_name"] == "orders" and t["table_schema"] == "shop" for t in d["top_tables"])
     assert any(w["locked_table"].endswith("`orders`") for w in d["innodb_lock_waits"]), d["innodb_lock_waits"]
     assert "1 InnoDB lock wait(s)" in signals_for(res)
     assert result_status(res) == "ok" and "validated: live" in render(res)
+
+
+def test_mysql_routines_without_show_routine_keep_rows_and_signal(mysql84, monkeypatch):
+    monkeypatch.setenv("DEA_TEST_MY_PW", mysql84["mon_pw"])
+    src = parse_config(
+        "sources:\n  - name: shopdb\n    type: sql\n    pack: mysql\n    timeout_seconds: 60\n"
+        f"    conn: {{url: 'mysql+pymysql://mon_nopriv@127.0.0.1:{mysql84['port']}/shop', password: 'env:DEA_TEST_MY_PW'}}\n"
+        "    options: {routine_kinds: [procedure, function]}\n").sources[0]
+    res = run_source(src)
+    rows = res["data"].get("routines")
+    assert rows is not None, res["errors"]
+    assert {r["name"] for r in rows} <= {"refresh_orders", "order_total"}
+    assert all(r["body_hash"] == "" and r["parse"] == "none" for r in rows)
+    assert any("without a body" in x for x in signals_for(res))
 
 
 def test_mysql_long_processlist_with_a_short_threshold(mysql84, monkeypatch, tmp_path):

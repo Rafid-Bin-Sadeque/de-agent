@@ -7,6 +7,37 @@ MAX_RAW = 1_000_000  # raw hook stdin; larger is refused before json.loads
 TOO_LARGE = "de-agent: input too large to check ({what}); split it into smaller commands (limits: 200 KB input, 100 KB SQL)"
 
 
+def find_hub(cwd=None):
+    """The hub directory, mirroring cli/src/de_agent/hubpath.py: $DEA_HUB, else the nearest de-agent.yaml walking up
+    from cwd, else `hub:` in ~/.config/de-agent/config.yaml (absolute, existing dir). None when nothing matches."""
+    import os
+    import re
+
+    env = os.environ.get("DEA_HUB")
+    if env:
+        p = os.path.expanduser(env)
+        return p if os.path.isdir(p) else None
+    cur = os.path.abspath(cwd or os.getcwd())
+    while True:
+        if os.path.isfile(os.path.join(cur, "de-agent.yaml")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    try:
+        with open(os.path.expanduser("~/.config/de-agent/config.yaml"), encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    m = re.search(r"^hub:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$", text, re.M)
+    if m:
+        p = os.path.expanduser(m.group(1).strip())
+        if os.path.isabs(p) and os.path.isdir(p):
+            return p
+    return None
+
+
 def input_too_large(data) -> str | None:
     """Deny reason when a Bash command or MCP tool_input is over the cap, else None. Runs BEFORE any parsing."""
     import json

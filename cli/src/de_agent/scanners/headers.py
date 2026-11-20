@@ -85,7 +85,10 @@ def build_block(project: str, results: list[dict[str, Any]], edges: dict[str, An
     L.append(f"- top tables written: {_top(writes)}")
     L.append(f"- top tables read: {_top(reads)}")
     cross: dict[tuple[str, str, str], None] = {}
+    skip = {t.lower() for t in edges.get("ignore_tables", [])}  # bookkeeping tables: the same set `dea impact` skips
     for c in edges["cross_project"]:
+        if c["table"].lower() in skip:
+            continue
         if c["writer_project"] == project:
             cross[("→", c["reader_project"], c["table"])] = None
         elif c["reader_project"] == project:

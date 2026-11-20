@@ -494,3 +494,23 @@ def test_scan_command_prints_new_scan_types(tmp_path, monkeypatch):
     assert r.exit_code == 0, r.output
     assert "jobs: python ok" in r.output and "owners=" in r.output and "infra: terraform ok" in r.output and "resources=15" in r.output
     assert cli_mod  # imported for the CLI wiring
+
+
+def test_profile_header_omits_edges_through_ignored_tables():
+    from de_agent.scanners.headers import build_block
+
+    edges = {
+        "tables": {},
+        "cross_project": [
+            {"table": "etl.load_state", "writer_project": "ingest", "reader_project": "orders"},
+            {"table": "analytics.orders", "writer_project": "ingest", "reader_project": "orders"},
+        ],
+        "ignore_tables": ["etl.load_state"],
+    }
+    results = [{"scan": "s", "type": "sql", "revision": "r", "stats": {"objects": 1, "files": 1, "heuristic": 0}, "symbols": []}]
+    out = build_block("orders", results, edges, {}, {"ingest"}, [])
+    assert "analytics.orders" in out and "etl.load_state" not in out
+    edges.pop("ignore_tables")
+    assert "etl.load_state" in build_block("orders", results, edges, {}, {"ingest"}, [])
+    edges["ignore_tables"] = ["etl.load_state", "analytics.orders"]
+    assert "cross-project edges: none" in build_block("orders", results, edges, {}, {"ingest"}, [])

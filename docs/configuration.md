@@ -45,6 +45,8 @@ Per-collector `options` and the `aws`, `data_api` and `services` blocks are docu
 | `map_budget_tokens` | integer (> 0) | `1500` | Token budget for the generated map.md (the file loaded every session). |
 | `snapshot_max_age_hours` | number (> 0) | `24` | A snapshot older than this is flagged as stale at session start. |
 | `retention` | integer (>= 1) | `30` | Number of dated snapshots kept per source. |
+| `map_file` | string | `"map.md"` | The hub's map page: a relative path inside the hub (no `..`, ends in `.md`). Set it when the map already lives under another name. |
+| `session_map` | boolean | `true` | Inject the map page at session start. Set `false` when the map is already loaded another way (for example a CLAUDE.md import), so it is not loaded twice; due rows and stale-platform rows are still injected. |
 
 ## `guard`
 
@@ -107,3 +109,4 @@ Per-collector `options` and the `aws`, `data_api` and `services` blocks are docu
 | `target_dir` | string | `"target"` | dbt: directory holding `manifest.json`, relative to `path`. |
 | `globs` | list of string |  | sql and python: file globs under `path` (python default: `**/*.py`, `**/*.ipynb`). |
 | `dialect` | string | `"postgres"` | airflow and python (SQL strings), sql and terraform: sqlglot dialect used to parse SQL. |
+| `connections` | object |  | airflow: Airflow connection id -> de-agent source name, so a `CALL x.y` in a DAG resolves to the live routine of that source. |

@@ -633,3 +633,143 @@ def test_user_names_are_resolved_from_a_separate_query_not_a_join():
     a.pop(rs.Q_USERNAMES.sql)  # name lookup unavailable: ids are shown, the section still succeeds
     res = collect(a)
     assert [u["user"] for u in res["data"]["workload_users"]] == ["user#101", "user#102"] and res["errors"] == []
+
+
+# ---------------------------------------------------------------- routines (v0.3 section 2.2), fixtures only
+
+
+def test_routines_section_rows_and_store(tmp_path):
+    from de_agent.routines import RoutineStore
+
+    res = collect(fx.healthy(), routine_store=RoutineStore(tmp_path))
+    assert res["errors"] == []
+    rows = {(r["schema"], r["name"], r["args"]): r for r in res["data"]["routines"]}
+    assert set(rows) == {
+        ("acme", "refresh_orders", "()"), ("acme", "load_day", "(date, integer)"), ("acme", "f_cents", "(numeric)"),
+        ("acme", "f_slug", "(character varying)"), ("acme", "v_open_orders", ""), ("acme", "v_late", ""),
+        ("acme", "mv_daily", ""), ("acme", "mv_hidden", "")}
+    assert rows[("acme", "refresh_orders", "()")]["kind"] == "procedure"
+    assert rows[("acme", "mv_daily", "")]["kind"] == "materialized_view"      # pg_views row relabelled by svv_mv_info
+    assert rows[("acme", "mv_hidden", "")]["kind"] == "materialized_view"     # not in pg_views: pg_get_viewdef
+    assert rows[("acme", "f_cents", "(numeric)")]["returns"] == "bigint"
+    assert rows[("acme", "f_slug", "(character varying)")]["language"] == "plpythonu"
+    store = RoutineStore(tmp_path)
+    body = store.get(rows[("acme", "refresh_orders", "()")]["body_hash"])
+    assert body.startswith("CREATE OR REPLACE PROCEDURE acme.refresh_orders()\nAS $$\nbegin") and body.endswith("LANGUAGE plpgsql;")
+    show = store.get(rows[("acme", "load_day", "(date, integer)")]["body_hash"])   # empty prosrc -> SHOW PROCEDURE
+    assert "load_day(d date, batch integer)" in show and "call acme.refresh_orders()" in show
+    assert "f_slug(a character varying) RETURNS character varying" in store.get(
+        rows[("acme", "f_slug", "(character varying)")]["body_hash"])
+    assert "NO SCHEMA BINDING" in store.get(rows[("acme", "v_late", "")]["body_hash"])
+    assert "customers" in store.get(rows[("acme", "mv_hidden", "")]["body_hash"])
+    assert "routines" in rs.RedshiftCollector.heavy_sections
+
+
+def test_routines_never_join_a_leader_node_catalog_to_compute_node_tables():
+    for v in [*rs.v_routine_procs(10), *rs.v_routine_udfs(10), *rs.v_routine_views(10), rs.Q_ROUTINE_MVS]:
+        low = v.sql.lower()
+        assert not any(t in low for t in ("stl_", "stv_", "sys_", "svl_")), v.sql
+    assert "svv_mv_info" not in " ".join(v.sql.lower() for v in rs.v_routine_procs(10))
+
+
+def test_routines_mv_name_only_fallback_when_no_body_source():
+    a = fx.healthy()
+    a[rs.q_mv_viewdef("acme", "mv_hidden").sql] = CollectorError("permission denied")
+    res = collect(a)
+    row = next(r for r in res["data"]["routines"] if r["name"] == "mv_hidden")
+    assert row["kind"] == "materialized_view" and row["body_hash"] == "" and row["parse"] == "none"
+    assert res["data"]["meta"]["routines_mv_bodies_missing"] == 1 and res["errors"] == []
+
+
+def test_routines_mv_list_unavailable_degrades_to_views():
+    a = fx.healthy()
+    a[rs.Q_ROUTINE_MVS.sql] = CollectorError("permission denied for relation svv_mv_info")
+    res = collect(a)
+    assert res["errors"] == [] and res["data"]["meta"]["routines_mv_unavailable"] is True
+    assert {r["kind"] for r in res["data"]["routines"] if r["name"] == "mv_daily"} == {"view"}
+
+
+def test_routines_core_failure_is_all_or_nothing():
+    a = fx.healthy()
+    a[rs.v_routine_views(5000)[0].sql] = CollectorError("permission denied for relation pg_views")
+    res = collect(a)
+    assert "routines" not in res["data"]
+    assert any(e.startswith("routines:") for e in res["errors"])
+    assert res["data"]["meta"]["sections"]["routines"]["source"] is None
+
+
+def test_routines_procs_fall_back_to_untyped_args():
+    a = fx.healthy()
+    primary, fallback = rs.v_routine_procs(5000)
+    a[primary.sql] = CollectorError("function oidvectortypes(oidvector) does not exist")
+    a[fallback.sql] = [{"schema": "acme", "name": "refresh_orders", "kind": "procedure", "args": "()",
+                        "language": "plpgsql", "returns": "", "owner": "x", "definition": "begin end;", "argnames": None}]
+    res = collect(a)
+    assert any(r["name"] == "refresh_orders" for r in res["data"]["routines"]) and res["errors"] == []
+
+
+def test_routines_options_off_kinds_and_cap():
+    log = []
+    res = collect(fx.healthy(), log=log, source=_src(options="{routines: false}"))
+    assert "routines" not in res["data"] and not any("pg_views" in q for q, _ in log)
+    res = collect(fx.healthy(), source=_src(options="{routine_kinds: [view]}"))
+    assert {r["kind"] for r in res["data"]["routines"]} <= {"view", "materialized_view"}
+    a = {**fx.healthy(), **fx.routines_answers(2)}
+    res = collect(a, source=_src(options="{routines_max: 2}"))
+    assert "routines" not in res["data"] and any("routines_max" in e for e in res["errors"])
+    with pytest.raises(Exception, match="routines_ttl_h"):
+        _src(options="{routines_ttl_h: 0}")
+
+
+def test_routines_ttl_reuse_deep_and_expiry():
+    first = collect(fx.healthy())
+    first["data"]["meta"]["sections"]["routines"]["computed_at"] = "2026-10-19T00:00:00Z"
+    now = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
+    log = []
+    second = collect(fx.healthy(), log=log, prior=first, now=now)       # 12h old < 24h
+    assert second["data"]["routines"] == first["data"]["routines"]
+    assert second["data"]["meta"]["sections"]["routines"]["cached_from"] == "2026-10-19T00:00:00Z"
+    assert not any("pg_proc_info" in q or "pg_views" in q for q, _ in log)
+    assert "routines" in rs.RedshiftCollector.reused_data(second["data"])[0]
+    log.clear()
+    collect(fx.healthy(), log=log, prior=first, now=now, deep=True)
+    assert any("pg_views" in q for q, _ in log)
+    log.clear()
+    collect(fx.healthy(), log=log, prior=first, now=datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc))
+    assert any("pg_views" in q for q, _ in log)
+    log.clear()
+    collect(fx.healthy(), log=log, prior=first, now=now, source=_src(options="{routines_ttl_h: 6}"))
+    assert any("pg_views" in q for q, _ in log)
+
+
+def test_routines_secret_in_body_is_redacted(tmp_path):
+    from de_agent.routines import RoutineStore
+
+    a = fx.healthy()
+    a[rs.v_routine_views(5000)[0].sql] = [{"schema": "acme", "name": "v", "kind": "view", "args": "", "language": "sql",
+                                           "returns": "", "owner": "o", "definition": "select 'password=hunter2'"}]
+    res = collect(a, routine_store=RoutineStore(tmp_path))
+    row = next(r for r in res["data"]["routines"] if r["name"] == "v")
+    assert row["redacted"] and "hunter2" not in RoutineStore(tmp_path).get(row["body_hash"])
+    assert "hunter2" not in json.dumps(res)
+
+
+def test_routines_show_procedure_is_skipped_for_a_hostile_argument_signature():
+    a = fx.healthy()
+    primary = rs.v_routine_procs(5000)[0].sql
+    a[primary] = [{"schema": "acme", "name": "evil", "kind": "procedure", "args": "(integer); drop table x", "language": "plpgsql",
+                   "returns": "", "owner": "o", "definition": "", "argnames": None}]
+    log = []
+    res = collect(a, log=log)
+    assert not any(q.lower().startswith("show procedure") for q, _ in log)
+    row = next(r for r in res["data"]["routines"] if r["name"] == "evil")
+    assert row["body_hash"] == ""
+
+
+def test_argnames_accepts_every_shape_and_never_casts_an_array_to_varchar():
+    from de_agent.collectors import redshift as R
+
+    assert R._argnames("d,batch") == ["d", "batch"] == R._argnames("{d,batch}") == R._argnames(["d", "batch"])
+    assert R._argnames(None) == [] == R._argnames("") == R._argnames("{}")
+    for v in (*R.v_routine_procs(10), *R.v_routine_udfs(10)):
+        assert "proargnames::" not in v.sql  # Redshift: cannot cast type text[] to character varying (live 2026-11-08)

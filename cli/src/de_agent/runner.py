@@ -24,10 +24,11 @@ def result_status(result: dict[str, Any]) -> str:
 
 def run_source(
     source: SourceConfig, query_fn: Callable[..., list[dict[str, Any]]] | None = None,
-    prior: dict[str, Any] | None = None, deep: bool = False,
+    prior: dict[str, Any] | None = None, deep: bool = False, routine_store: Any = None,
 ) -> dict[str, Any]:
     collector = get_collector(source.type)
-    ctx = RunContext(timeout_seconds=source.timeout_seconds, query_fn=query_fn, prior=prior, deep=deep)
+    ctx = RunContext(timeout_seconds=source.timeout_seconds, query_fn=query_fn, prior=prior, deep=deep,
+                     routine_store=routine_store)
     collected_at = utc_iso()
     t0 = time.monotonic()
     try:
@@ -47,12 +48,13 @@ def run_sources(
     max_workers: int = MAX_WORKERS,
     priors: dict[str, dict[str, Any]] | None = None,
     deep: bool = False,
+    routine_store: Any = None,
 ) -> list[dict[str, Any]]:
     """Results in the same order as `sources`. `priors`: source name -> latest usable earlier result (heavy-section reuse)."""
     if not sources:
         return []
     pool = ThreadPoolExecutor(max_workers=max_workers)
-    futures = [(s, pool.submit(run_source, s, query_fn, (priors or {}).get(s.name), deep)) for s in sources]
+    futures = [(s, pool.submit(run_source, s, query_fn, (priors or {}).get(s.name), deep, routine_store)) for s in sources]
     results: list[dict[str, Any]] = []
     for s, fut in futures:
         try:

@@ -41,3 +41,12 @@ _Pack `mssql` v1, sql, validated: fixtures (fixtures only: not yet run against a
 | schema_name | table_name | total_bytes | approx_rows |
 |---|---|---|---|
 | dbo | Orders | 2147483648 | 5200000 |
+
+## Routines
+
+| schema | procedure | function | view | trigger | total |
+|---|---|---|---|---|---|
+| dbo | 1 | 1 | 1 | 1 | 4 |
+
+- parse coverage: full 3, heuristic 1, none 0
+- truncated: 0, redacted: 0, without a body: 0

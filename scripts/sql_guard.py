@@ -16,7 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, "_vendor"), os.path.join(os.path.dirname(HERE), "cli", "src")]
 
 sys.path.insert(0, HERE)
-from _guardlib import MAX_RAW, MAX_SQL, TOO_LARGE, input_too_large  # noqa: E402
+from _guardlib import MAX_RAW, MAX_SQL, TOO_LARGE, find_hub, input_too_large  # noqa: E402
 
 NOT_INSTALLED = "de-agent CLI not installed: pipx install de-agent"
 MCP_NAME = re.compile(r"query|sql|execute", re.I)
@@ -137,6 +137,7 @@ def main() -> None:
             emit("deny", TOO_LARGE.format(what="one SQL statement is over 100 KB"))
             return
         project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or "."
+        project_dir = find_hub(project_dir) or project_dir  # config + approved plans live in the hub, not the session folder
         if any(BARE_VAR.fullmatch(sql) for _, sql in pairs):
             emit("deny", VAR_MSG)  # fail closed: the statement is unknowable, even for an approved executor
             return

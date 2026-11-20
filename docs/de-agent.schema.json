@@ -110,6 +110,18 @@
           "minimum": 1,
           "title": "Retention",
           "type": "integer"
+        },
+        "map_file": {
+          "default": "map.md",
+          "description": "The hub's map page: a relative path inside the hub (no `..`, ends in `.md`). Set it when the map already lives under another name.",
+          "title": "Map File",
+          "type": "string"
+        },
+        "session_map": {
+          "default": true,
+          "description": "Inject the map page at session start. Set `false` when the map is already loaded another way (for example a CLAUDE.md import), so it is not loaded twice; due rows and stale-platform rows are still injected.",
+          "title": "Session Map",
+          "type": "boolean"
         }
       },
       "title": "HubConfig",
@@ -212,6 +224,14 @@
           "description": "airflow and python (SQL strings), sql and terraform: sqlglot dialect used to parse SQL.",
           "title": "Dialect",
           "type": "string"
+        },
+        "connections": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "airflow: Airflow connection id -> de-agent source name, so a `CALL x.y` in a DAG resolves to the live routine of that source.",
+          "title": "Connections",
+          "type": "object"
         }
       },
       "required": [
