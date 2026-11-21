@@ -14,6 +14,8 @@ def test_versions_agree():
     market = [p.get("version") for p in json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())["plugins"]]
     assert py == plugin == de_agent.__version__
     assert market == [plugin]  # `claude plugin validate --strict` fails on a mismatch
+    status = re.search(r"^Status: v([0-9][^.\s]*\.[0-9]+\.[0-9]+)", (ROOT / "README.md").read_text(), re.M)
+    assert status and status.group(1) == py  # README header said v0.2.4 for two releases
 
 
 def test_marketplace_names_the_plugin():

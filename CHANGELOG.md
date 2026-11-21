@@ -5,6 +5,26 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-21
+
+Struck-through due items, DMS lineage from Terraform-managed tasks, README status. Patch release, no config changes.
+
+### Fixed
+- status.md / session hook: a dated list item with a partial struck span (`~~date ... thing~~ outcome`) was incorrectly
+  counted as open. The done rule now matches any item whose text starts with `~~` and has a closing `~~` after the opening
+  (meaning the date is inside the struck span). Whole-line strikes and checked tasks are unchanged.
+- Terraform DMS scanner: `data.aws_dms_endpoint.<name>.<attr>` references are resolved by `Ctx.address()` and are no
+  longer added to unresolved refs.
+- Terraform DMS scanner: `replication_task_id = var.<x>` resolves to the variable's literal default; the catalog now
+  shows `dms:<task-id>` instead of `dms:<resource-name>`.
+- Terraform DMS scanner: schema/table `rename` transformation rules in `table_mappings` are applied to the target key
+  for database endpoints, so a task mapping `api_backend.*` to `test_api_backend.*` shows the correct target schema.
+- Terraform DMS scanner: when `table_mappings = jsonencode(local...)` cannot be statically resolved, the scanner falls
+  back to the latest hub snapshot's `dms_table_mappings` section for that task id. Fallback pairs carry
+  `via: live-snapshot:<ts>` and the catalog line notes `(via snapshot)`. When static mapping and snapshot are both
+  available but disagree, a `mapping drift: <task>` warning is included in the scan result.
+- README header said `Status: v0.2.4` since 0.2.4; it now matches the released version, and a release-metadata test keeps it in step.
+
 ## [0.3.2] - 2026-11-19
 
 Hook false positives, DMS table mappings in the aws collector, and help keeping snapshots fresh. No config breaking changes.

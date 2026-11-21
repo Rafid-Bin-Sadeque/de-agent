@@ -160,7 +160,10 @@ def render_terraform(res: dict[str, Any]) -> dict[str, str]:
             if n["writes"]:
                 parts.append(f"writes: {_list(n['writes'])}")
             if n["pairs"]:
-                parts.append("replicates: " + _list([f"{p['source']} → {p['target']}" for p in n["pairs"]]))
+                pairs_str = _list([f"{p['source']} → {p['target']}" for p in n["pairs"]])
+                if n.get("snapshot_fallback"):
+                    pairs_str += " (via snapshot)"
+                parts.append("replicates: " + pairs_str)
             if n["unclear"]:
                 parts.append("direction unclear: " + _list(n["unclear"]))
             lines.append("- " + " · ".join(parts))
@@ -168,6 +171,10 @@ def render_terraform(res: dict[str, Any]) -> dict[str, str]:
     if res["unresolved_refs"]:
         lines += ["## Unresolved references", ""]
         lines += [f"- {u['name']} (in {u['referenced_by']})" for u in res["unresolved_refs"]]
+        lines.append("")
+    if res.get("warnings"):
+        lines += ["## Mapping drift", ""]
+        lines += [f"- {w}" for w in sorted(res["warnings"])]
         lines.append("")
     if res["errors"]:
         lines += ["## Parse notes", ""] + [f"- {e}" for e in res["errors"]] + [""]

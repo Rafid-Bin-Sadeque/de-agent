@@ -123,7 +123,7 @@ def scan_one(hub: Path, scan: Any, full: bool) -> tuple[dict[str, Any] | None, d
         per_file, hashes, parsed, cached = _per_file(
             scan, files, cache, full, lambda src, rel: tf_scan.scan_terraform_text(src, rel, scan.dialect))
         rev = source_revision(root, hashes)
-        result = tf_scan.assemble(scan, per_file, rev)
+        result = tf_scan.assemble(scan, per_file, rev, hub=hub)
         _dump(cache_p, {"sig": _sig(scan), "files": {r: {"sha": hashes[r], "result": per_file[r]} for r in per_file}})
         state.update({"files": hashes, "parsed": parsed, "cached": cached})
     else:

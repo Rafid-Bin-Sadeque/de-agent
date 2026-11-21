@@ -42,6 +42,13 @@ CASES = [
     ("done-section-ignored", "## Done\n- 2026-11-01 finished thing\n- 2026-11-02 other\n", [], []),
     ("section-ends-at-next-heading", "## Dated\n- 2026-11-10 a\n\n## Recently done\n- 2026-11-09 b\n", ["2026-11-10"], []),
     ("bullet-without-date-ignored", "## Dated\n- check the thing\n- 2026-13-45 bad date\n", [], []),
+    # v0.3.3: partial strike covering the date is done; strike not covering the date is still open
+    ("bullet-partial-strike-done",
+     "## Dated\n- ~~**2026-11-08 verify** thing~~ outcome text\n- 2026-11-09 open\n",
+     ["2026-11-09"], ["2026-11-09"]),
+    ("bullet-strike-not-on-date",
+     "## Dated\n- **2026-11-08 task** ~~old note~~\n",
+     ["2026-11-08"], ["2026-11-08"]),
 ]
 
 

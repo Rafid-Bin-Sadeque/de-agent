@@ -400,6 +400,7 @@ def first(attrs: Any, path: str) -> Any:
 
 REF_RE = re.compile(r"^\$\{\s*([^{}]*?)\s*\}$")
 ADDR_RE = re.compile(r"^(?!var\.|local\.|data\.|module\.|each\.|count\.|path\.|self\.)([a-z][a-z0-9_]*)\.([A-Za-z0-9_-]+)(?:\.|\[|$)")
+DATA_ADDR_RE = re.compile(r"^data\.([a-z][a-z0-9_]*)\.([A-Za-z0-9_-]+)(?:\.|\[|$)")
 NAME_ATTR = {"aws_s3_bucket": "bucket", "google_storage_bucket": "name", "aws_kinesis_stream": "name",
              "google_pubsub_topic": "name", "google_pubsub_subscription": "name",
              "aws_kinesis_firehose_delivery_stream": "name", "google_bigquery_dataset": "dataset_id",
@@ -409,6 +410,7 @@ NAME_ATTR = {"aws_s3_bucket": "bucket", "google_storage_bucket": "name", "aws_ki
 class Ctx:
     def __init__(self, resources: list[dict[str, Any]], variables: dict[str, str], locals_: dict[str, str]) -> None:
         self.by_addr = {f"{r['type']}.{r['name']}": r for r in resources if r["kind"] == "resource"}
+        self.by_addr.update({f"data.{r['type']}.{r['name']}": r for r in resources if r["kind"] == "data"})
         self.variables, self.locals = variables, locals_
         self.unresolved: list[dict[str, str]] = []
 
@@ -454,12 +456,19 @@ class Ctx:
         return None
 
     def address(self, v: Any) -> dict[str, Any] | None:
-        """The resource a reference like `aws_dms_endpoint.src.endpoint_arn` points at."""
+        """The resource or data source a reference like `aws_dms_endpoint.src.endpoint_arn` or
+        `data.aws_dms_endpoint.target.endpoint_arn` points at."""
         if not isinstance(v, str):
             return None
         m = REF_RE.match(v)
-        am = ADDR_RE.match(m.group(1)) if m else None
-        return self.by_addr.get(f"{am.group(1)}.{am.group(2)}") if am else None
+        ref = m.group(1).strip() if m else v.strip()
+        am = ADDR_RE.match(ref)
+        if am:
+            return self.by_addr.get(f"{am.group(1)}.{am.group(2)}")
+        dm = DATA_ADDR_RE.match(ref)
+        if dm:
+            return self.by_addr.get(f"data.{dm.group(1)}.{dm.group(2)}")
+        return None
 
 
 def _bucket_from(ctx: Ctx, v: Any, owner: str) -> str | None:
@@ -496,6 +505,41 @@ def _dms_rules(raw: Any) -> list[dict[str, str]]:
     return [r for r in rules if r.get("type") == "selection" and r.get("action", "include") == "include"]
 
 
+def _dms_transforms(raw: Any) -> list[dict[str, str]]:
+    """Transformation rules from table_mappings (rule-target, action, schema, table, value)."""
+    text = raw if isinstance(raw, str) else json.dumps(raw)
+    rules: list[dict[str, str]] = []
+    cur: dict[str, str] | None = None
+    _KEY = {"rule-action": "action", "rule-target": "target",
+            "schema-name": "schema", "table-name": "table", "value": "value"}
+    for m in re.finditer(
+        r'"(rule-type|rule-action|rule-target|schema-name|table-name|value)"\s*[=:]\s*\\?"([^"\\]*)\\?"', text
+    ):
+        key, val = m.group(1), m.group(2)
+        if key == "rule-type":
+            cur = {"type": val}
+            rules.append(cur)
+        elif cur is not None and key in _KEY:
+            cur[_KEY[key]] = val
+    return [r for r in rules if r.get("type") == "transformation"]
+
+
+def _apply_dms_rename(schema: str, table: str, transforms: list[dict[str, str]]) -> tuple[str, str]:
+    """Apply rename transformation rules to get (target_schema, target_table)."""
+    tsch, ttbl = schema, table
+    for r in transforms:
+        if r.get("action") != "rename":
+            continue
+        rsch = r.get("schema", "%")
+        if r.get("target") == "schema" and (rsch == "%" or rsch == schema) and r.get("value"):
+            tsch = r["value"]
+        elif r.get("target") == "table":
+            rtbl = r.get("table", "%")
+            if (rsch == "%" or rsch == schema) and (rtbl == "%" or rtbl == table) and r.get("value"):
+                ttbl = r["value"]
+    return tsch, ttbl
+
+
 def h_dms_task(res: dict[str, Any], ctx: Ctx, owner: str, dialect: str) -> dict[str, Any]:
     a = res["attrs"]
     out: dict[str, Any] = {"pairs": [], "id": None}
@@ -508,14 +552,17 @@ def h_dms_task(res: dict[str, Any], ctx: Ctx, owner: str, dialect: str) -> dict[
     tattrs = tgt["attrs"]
     bucket = ctx.text(first(tattrs, "s3_settings.bucket_name"), owner)
     folder = (ctx.text(first(tattrs, "s3_settings.bucket_folder"), owner, False) or "").strip("/")
-    for r in _dms_rules(a.get("table_mappings")):
+    raw_mappings = a.get("table_mappings")
+    transforms = _dms_transforms(raw_mappings)
+    for r in _dms_rules(raw_mappings):
         sch, tbl = r.get("schema", "%"), r.get("table", "%")
         skey = f"{sch}.{tbl}".lower()
         pattern = "%" in sch or "%" in tbl
         if bucket:
             tkey = _s3(bucket, "/".join(x for x in (folder, sch, tbl) if x) + "/")
         elif tattrs.get("engine_name"):
-            tkey = skey
+            tsch, ttbl = _apply_dms_rename(sch, tbl, transforms)
+            tkey = f"{tsch}.{ttbl}".lower()
         else:
             continue
         out["pairs"].append({"source": skey, "target": tkey, "pattern": pattern})
@@ -713,7 +760,41 @@ def node_key_of(res: dict[str, Any], ctx: Ctx) -> str | None:
     return None
 
 
-def assemble(scan: Any, per_file: dict[str, dict[str, Any]], revision: str) -> dict[str, Any]:
+def _load_snap_dms(hub: Path) -> dict[str, tuple[str, list[dict[str, Any]]]]:
+    """Latest hub snapshot's dms_table_mappings keyed by task id -> (collected_at, pairs)."""
+    snaps_dir = hub / ".dea" / "snapshots"
+    if not snaps_dir.is_dir():
+        return {}
+    dirs = sorted(d for d in snaps_dir.iterdir() if d.is_dir())
+    if not dirs:
+        return {}
+    latest = dirs[-1]
+    task_pairs: dict[str, list[dict[str, Any]]] = {}
+    task_ts: dict[str, str] = {}
+    for jf in sorted(latest.glob("*.json")):
+        try:
+            snap = json.loads(jf.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        ts = snap.get("collected_at") or (snap.get("data") or {}).get("meta", {}).get("collected_at", "")
+        rows = (snap.get("data") or {}).get("dms_table_mappings") or []
+        for row in rows:
+            tid = str(row.get("task", "")).strip()
+            if not tid:
+                continue
+            task_ts.setdefault(tid, ts)
+            ssch = str(row.get("schema", "")).lower()
+            stbl = str(row.get("table", "")).lower()
+            tsch = str(row.get("target_schema", ssch)).lower()
+            ttbl = str(row.get("target_table", stbl)).lower()
+            task_pairs.setdefault(tid, []).append({
+                "source": f"{ssch}.{stbl}", "target": f"{tsch}.{ttbl}",
+                "via": f"live-snapshot:{task_ts[tid]}", "pattern": "%" in ssch or "%" in stbl,
+            })
+    return {tid: (task_ts[tid], task_pairs[tid]) for tid in task_pairs}
+
+
+def assemble(scan: Any, per_file: dict[str, dict[str, Any]], revision: str, hub: Path | None = None) -> dict[str, Any]:
     resources: list[dict[str, Any]] = []
     variables: dict[str, str] = {}
     locals_: dict[str, str] = {}
@@ -752,13 +833,29 @@ def assemble(scan: Any, per_file: dict[str, dict[str, Any]], revision: str) -> d
         nodes.append(node)
     seen = set()
     unresolved = [u for u in ctx.unresolved if not (repr(u) in seen or seen.add(repr(u)))]
+    snap_dms = _load_snap_dms(hub) if hub is not None else {}
+    warnings: list[str] = []
+    for node in nodes:
+        if node["type"] != "aws_dms_replication_task":
+            continue
+        tid = node["id"][4:] if node.get("id", "").startswith("dms:") else ""
+        snap = snap_dms.get(tid)
+        if not node["pairs"] and snap is not None:
+            _, snap_pairs = snap
+            node["pairs"] = sorted(snap_pairs, key=lambda p: (p["source"], p["target"]))
+            node["snapshot_fallback"] = True
+        elif node["pairs"] and snap is not None:
+            static_set = {(p["source"], p["target"]) for p in node["pairs"]}
+            snap_set = {(p["source"], p["target"]) for p in snap[1]}
+            if static_set.symmetric_difference(snap_set):
+                warnings.append(f"mapping drift: {tid}")
     return {"scan": scan.name, "type": "terraform", "project": scan.project_name, "revision": revision, "nodes": nodes,
             "unresolved_refs": sorted(unresolved, key=lambda u: (u["name"], u["referenced_by"])),
             "stats": {"files": len(per_file), "resources": len(nodes), "data_nodes": sum(1 for n in nodes if n["data"]),
                       "edges": sum(len(n["reads"]) + len(n["writes"]) + 2 * len(n["pairs"]) for n in nodes),
                       "unresolved_refs": len(unresolved), "parse_errors": len(errors),
                       "parser": ",".join(sorted(parsers)) or "regex"},
-            "errors": errors, "types": dict(sorted(types.items()))}
+            "errors": errors, "types": dict(sorted(types.items())), "warnings": warnings}
 
 
 def list_files(scan: Any, root: Path) -> dict[str, Path]:

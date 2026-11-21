@@ -158,7 +158,7 @@ def _bullet_item(line: str) -> tuple[str, bool] | None:
         text = t.group(2).strip()
     if lead_date(text) is None:
         return None
-    struck = len(text) > 4 and text.startswith("~~") and text.endswith("~~") and "~~" not in text[2:-2]
+    struck = text.startswith("~~") and "~~" in text[2:]
     return text, checked or struck
 
 
